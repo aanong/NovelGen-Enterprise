@@ -50,9 +50,9 @@ class LearnerAgent:
     """
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="deepseek-chat",
+            model="deepseek-r1:7b",
             openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
-            openai_api_base="https://api.deepseek.com/v1",
+            openai_api_base="http://localhost:11434/v1",
             temperature=0.1 # 提取任务需要低随机性
         )
         self.parser = PydanticOutputParser(pydantic_object=NovelSetupData)
