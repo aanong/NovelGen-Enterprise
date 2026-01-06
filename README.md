@@ -1,68 +1,94 @@
 # NovelGen-Enterprise (NGE)
 
 基于 LangGraph 的企业级多智能体长篇小说生成系统 (Enterprise Novel Generation System)。
-利用 **Deepseek-V3/R1** 进行严密逻辑推理与大纲架构，利用 **Gemini-1.5/3 Pro** 进行高质量长文本创作。
+本项目专为追求高质量、逻辑严密的长篇小说创作而设计，利用 **Deepseek-V3/R1** 进行底层逻辑规划，**Gemini-1.5/3 Pro** 进行文学性正文创作。
 
-## 核心特性
-- **双模型协作 (Dual-Model Strategy)**: 
-  - `Architect` & `Critic` (Deepseek): 负责大纲细化、逻辑审计、防崩坏检查。
-  - `Writer` (Gemini): 负责基于 RAG 的文风模仿、场景描写与正文生成。
-- **动态状态机 (Stateful Graph)**: 采用 LangGraph 构建循环图，而非线性链，支持“写-审-改”闭环。
-- **深度记忆 (Deep Context)**:
-  - `NovelBible`: 存储世界观、战力体系、地理设定。
-  - `CharacterRelationship`: 动态演化的人物关系矩阵。
-  - `ContextRefiner`: 智能检索本章最相关的伏笔与规则，压缩上下文 Token。
-- **企业级可观测性**: 全程记录 `LogicAudit` 审计日志。
+## 🌟 核心特性
+- **双模型深度协作 (Dual-Model Synergy)**: 
+  - `Architect` & `Critic` (Deepseek): 确保大纲严谨、逻辑闭环、无 OOC (Out of Character)。
+  - `Writer` (Gemini): 依托长上下文窗口，实现细腻的场景描写与风格化叙述。
+- **智能上下文精炼 (ContextRefiner)**: 
+  - 自动从海量设定中提取当前章节最相关的规则与伏笔，显著降低 Token 消耗并提升生成精准度。
+- **多维角色演化 (Character Evolution)**: 
+  - 动态跟踪人物心境、受损状态及人际关系矩阵，确保角色在长篇故事中具有持续的成长感。
+- **全流程逻辑审计 (LogicAudit)**: 
+  - 每一章节生成后都会进行多维度逻辑扫描，所有评审意见均持久化至数据库供复盘优化。
+- **一键文档初始化 (One-Click Onboarding)**: 
+  - 提供 `LearnerAgent`，支持通过纯文本设定文档自动初始化项目。
 
-## 项目结构
+## 📂 项目结构
 ```bash
 src/
-├── agents/         # 智能体实现 (Architect, Writer, Reviewer, StyleAnalyzer)
-├── db/             # 数据库层 (SQLAlchemy Models, pgvector)
-├── schemas/        # Pydantic 数据结构定义
-├── graph.py        # LangGraph 状态机定义 (Core Logic)
-└── main.py         # 程序入口
+├── agents/         # 智能体中心 (Architect, Writer, Reviewer, Learner, Analyzer)
+├── db/             # 数据库层 (SQLAlchemy 模型, pgvector RAG 支持)
+├── schemas/        # 数据协议定义 (Pydantic Models)
+├── scripts/        # 实用脚本 (数据导入、Seed 填充)
+├── graph.py        # LangGraph 核心状态机逻辑
+└── main.py         # 引擎运行入口
 ```
 
-## 快速开始 (Getting Started)
+## 🚀 完整使用教程 (Complete Tutorial)
 
-### 1. 环境准备
-确保已安装 Python 3.10+ 和 PostgreSQL (需启用 `pgvector` 插件)。
+### 1. 环境搭建
+首先，确保你的系统中安装了 **Python 3.10+** 和 **PostgreSQL** (推荐安装 `pgvector` 插件以获得最佳 RAG 体验)。
 
 ```bash
-# 复制环境变量模板
-cp .env.example .env
+# 1. 克隆项目
+git clone https://github.com/aanong/NovelGen-Enterprise.git
+cd NovelGen-Enterprise
 
-# 编辑 .env 填入 API Keys
-# GOOGLE_API_KEY=...
-# DEEPSEEK_API_KEY=...
-# POSTGRES_URL=postgresql://user:pass@localhost/novelgen
-```
-
-### 2. 安装依赖
-```bash
+# 2. 安装依赖
 pip install -r requirements.txt
+
+# 3. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，填入：
+# GOOGLE_API_KEY (用于 Gemini)
+# DEEPSEEK_API_KEY (用于 Deepseek)
+# POSTGRES_URL (格式: postgresql://user:pass@localhost:5432/dbname)
 ```
 
-### 3. 初始化数据库
-我们提供了自动初始化脚本，用于创建 `characters`, `novel_bible`, `chapters` 等核心表。
+### 2. 数据库初始化
+在第一次运行前，需要建立数据库表结构：
 
 ```bash
 python -m src.db.init_db
 ```
 
-### 4. 运行生成引擎
-启动主程序，开始根据预设状态生成小说。
+### 3. 初始化小说项目 (从中文文档导入)
+这是 NGE 的核心优势：你只需要准备一个包含小说设定、人物、大纲的中文 `.txt` 文件，系统将自动进行结构化。
+
+**示例设定文件 (`my_novel.txt`):**
+```text
+## 小说大纲
+第一章：觉醒。萧炎在纳兰嫣然的讥笑中开启了神秘戒指。
+第二章：药老现身。灵魂态的药老决定传授焚诀。
+
+## 人物设定
+萧炎：定位主角，坚毅，拥有报仇欲望。
+纳兰嫣然：云岚宗少宗主，高傲自大。
+
+## 世界观
+力量等级：斗之气、斗者、斗师...
+核心道具：骨灵冷火。
+```
+
+**运行导入脚本:**
+```bash
+python -m src.scripts.import_novel ./sample_inputs/novel_setup.txt
+```
+
+### 4. 启动生成引擎
+导入完成后，执行主程序开始生成正文。系统将自动读取数据库进度，按章节顺序进行 “规划 -> 上下文精炼 -> 撰写 -> 逻辑审计 -> 人物演变” 的往复循环。
 
 ```bash
 python -m src.main
 ```
 
-## 工作流程 (Workflow)
+## 🛠 开发与调试
+- **查看历史日志**: 所有的生成记录和 LogicAudit 建议都存储在数据库的 `chapters` 和 `logic_audits` 表中。
+- **自定义文风**: 可以在 `src/agents/writer.py` 或初始化文档中通过 Few-shot Examples 调整 Gemini 的文学风格。
 
-1. **Load Context**: 从数据库加载最新的人物状态、世界观设定。
-2. **Plan (Architect)**: Deepseek 基于当前剧情进度，生成本章的“微型大纲” (场面调度、核心冲突)。
-3. **Refine Context**: 系统自动从 `NovelBible` 中检索与本章设定最相关的规则（如魔法属性、特定道具），注入上下文。
-4. **Write (Writer)**: Gemini 根据大纲和精炼后的上下文，撰写正文初稿。
-5. **Review (Critic)**: Deepseek 审查初稿逻辑，若不通过则打回重写 (Revise Loop)。
-6. **Evolve**: 章节通过后，更新人物心理状态、关系矩阵，并持久化章节内容。
+## 📌 注意事项
+- 确保 Postgres 服务已启动并创建了对应的数据库。
+- 长篇写作推荐使用 Gemini-1.5-Pro 以获得更连贯的上下文记忆。
