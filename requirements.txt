@@ -1,0 +1,11 @@
+langchain
+langchain-google-genai
+langchain-openai
+langgraph
+psycopg2-binary
+pgvector
+sqlalchemy
+alembic
+pydantic
+python-dotenv
+asyncpg
