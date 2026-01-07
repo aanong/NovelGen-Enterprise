@@ -26,11 +26,11 @@ class ArchitectAgent:
     利用 Deepseek 的推理能力防止剧情崩坏。
     """
     def __init__(self):
-        # 使用 Deepseek 模型 (通过 OpenAI 兼容接口)
+        # 使用本地 Ollama (与 ReviewerAgent 一致) 或 DeepSeek 云端
         self.llm = ChatOpenAI(
-            model="deepseek-chat", # 或者 deepseek-reasoner (R1)
-            openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
-            openai_api_base="https://api.deepseek.com/v1",
+            model="deepseek-r1:7b",
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY") or "ollama",
+            openai_api_base="http://localhost:11434/v1",
             temperature=0.3
         )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
