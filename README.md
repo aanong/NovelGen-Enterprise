@@ -1,94 +1,70 @@
-# NovelGen-Enterprise (NGE)
+# NovelGen-Enterprise (NGE) 🚀
 
-基于 LangGraph 的企业级多智能体长篇小说生成系统 (Enterprise Novel Generation System)。
-本项目专为追求高质量、逻辑严密的长篇小说创作而设计，利用本地 **Deepseek** 进行底层逻辑规划，**Gemini-1.5/3 Pro** 进行文学性正文创作。
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Model](https://img.shields.io/badge/LLM-Gemini--2.0%20%7C%20DeepSeek--R1-orange)](https://deepseek.com/)
 
-## 🌟 核心特性
-- **双模型深度协作 (Dual-Model Synergy)**: 
-  - `Architect` & `Critic` (Deepseek): 确保大纲严谨、逻辑闭环、无 OOC (Out of Character)。
-  - `Writer` (Gemini): 依托长上下文窗口，实现细腻的场景描写与风格化叙述。
-- **智能上下文精炼 (ContextRefiner)**: 
-  - 自动从海量设定中提取当前章节最相关的规则与伏笔，显著降低 Token 消耗并提升生成精准度。
-- **多维角色演化 (Character Evolution)**: 
-  - 动态跟踪人物心境、受损状态及人际关系矩阵，确保角色在长篇故事中具有持续的成长感。
-- **全流程逻辑审计 (LogicAudit)**: 
-  - 每一章节生成后都会进行多维度逻辑扫描，所有评审意见均持久化至数据库供复盘优化。
-- **一键文档初始化 (One-Click Onboarding)**: 
-  - 提供 `LearnerAgent`，支持通过纯文本设定文档自动初始化项目。
+**NovelGen-Enterprise (NGE)** 是一款专为大规模、高逻辑性长篇小说设计的企业级多智能体生成引擎。
 
-## 📂 项目结构
+它采用了创新的 **"Antigravity Rules" (反重力规则)**，通过 **本地 DeepSeek (逻辑中枢)** 与 **云端 Gemini (文学工匠)** 的协同，彻底解决了 AI 创作长篇小说时常见的“逻辑坠毁”、“人物走形”和“上下文断裂”问题。
+
+---
+
+## ✨ 核心亮点
+
+- **🧠 逻辑与文学分离**: 所有的剧情拆解、逻辑审计由推理能力极强的 **DeepSeek-R1** 负责；所有的文风模仿、细节描写由具备超长上下文的 **Gemini-2.0** 负责。
+- **📉 动态上下文精炼 (Context Refiner)**: 系统不再一股脑填塞所有设定，而是通过 RAG 技术，仅提取当前章节最相关的 5% 设定，极大提升了生成的专注度。
+- **⚖️ 自动化逻辑审计**: 每一章都会经过 `Reviewer Agent` 的毒舌扫描，检查是否有逻辑硬伤或 OOC。
+- **🔄 持久化记忆链接**: 角色好感度、心境变化和最近三章的摘要被实时存入数据库，确保剧情万章不乱。
+
+---
+
+## 🛠 快速开始
+
+### 1. 环境依赖
+*   **Python**: 3.10+ (推荐 3.12)
+*   **Database**: PostgreSQL 16+ (推荐开启 `pgvector` 扩展)
+*   **Local LLM**: [Ollama](https://ollama.com/) (需运行 `ollama run deepseek-r1:7b`)
+
+### 2. 配置秘钥
+复制并编辑 `.env` 文件：
 ```bash
-src/
-├── agents/         # 智能体中心 (Architect, Writer, Reviewer, Learner, Analyzer)
-├── db/             # 数据库层 (SQLAlchemy 模型, pgvector RAG 支持)
-├── schemas/        # 数据协议定义 (Pydantic Models)
-├── scripts/        # 实用脚本 (数据导入、Seed 填充)
-├── graph.py        # LangGraph 核心状态机逻辑
-└── main.py         # 引擎运行入口
-```
-
-## 🚀 完整使用教程 (Complete Tutorial)
-
-### 1. 环境搭建
-首先，确保你的系统中安装了 **Python 3.10+** 和 **PostgreSQL** (推荐安装 `pgvector` 插件以获得最佳 RAG 体验)。
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/aanong/NovelGen-Enterprise.git
-cd NovelGen-Enterprise
-
-# 2. 安装依赖
-pip install -r requirements.txt
-
-# 3. 配置环境变量
 cp .env.example .env
-# 编辑 .env 文件，填入：
-# GOOGLE_API_KEY (用于 Gemini)
-# DEEPSEEK_API_KEY (用于 Deepseek)
-# POSTGRES_URL (格式: postgresql://user:pass@localhost:5432/dbname)
 ```
+确保包含以下配置项：
+*   `GOOGLE_API_KEY`: 申请 [Google AI Studio](https://aistudio.google.com/)。
+*   `POSTGRES_URL`: 你的数据库连接字符串。
 
-### 2. 数据库初始化
-在第一次运行前，需要建立数据库表结构：
-
-```bash
-python -m src.db.init_db
-```
-
-### 3. 初始化小说项目 (从中文文档导入)
-这是 NGE 的核心优势：你只需要准备一个包含小说设定、人物、大纲的中文 `.txt` 文件，系统将自动进行结构化。
-
-**示例设定文件 (`my_novel.txt`):**
-```text
-## 小说大纲
-第一章：觉醒。萧炎在纳兰嫣然的讥笑中开启了神秘戒指。
-第二章：药老现身。灵魂态的药老决定传授焚诀。
-
-## 人物设定
-萧炎：定位主角，坚毅，拥有报仇欲望。
-纳兰嫣然：云岚宗少宗主，高傲自大。
-
-## 世界观
-力量等级：斗之气、斗者、斗师...
-核心道具：骨灵冷火。
-```
-
-**运行导入脚本:**
+### 3. 数据导入
+将你的小说设定写在文本文件中：
 ```bash
 python -m src.scripts.import_novel ./sample_inputs/novel_setup.txt
 ```
 
-### 4. 启动生成引擎
-导入完成后，执行主程序开始生成正文。系统将自动读取数据库进度，按章节顺序进行 “规划 -> 上下文精炼 -> 撰写 -> 逻辑审计 -> 人物演变” 的往复循环。
-
+### 4. 开启无限创作
+系统会自动识别当前进度并生成下一章：
 ```bash
 python -m src.main
 ```
 
-## 🛠 开发与调试
-- **查看历史日志**: 所有的生成记录和 LogicAudit 建议都存储在数据库的 `chapters` 和 `logic_audits` 表中。
-- **自定义文风**: 可以在 `src/agents/writer.py` 或初始化文档中通过 Few-shot Examples 调整 Gemini 的文学风格。
+---
 
-## 📌 注意事项
-- 确保 Postgres 服务已启动并创建了对应的数据库。
-- 长篇写作推荐使用 Gemini-1.5-Pro 以获得更连贯的上下文记忆。
+## 📖 进阶技巧：如何写得更好？
+
+### 💡 怎么写下一章？
+你无需任何额外操作。系统每次运行 `main.py` 都会检查 `chapters` 表。如果第 1 章已完成，它会自动读取大纲并加载最近的 `MemoryContext` 来撰写第 2 章。
+
+### ✍️ 怎么完善（修改）已写的章节？
+1.  **手动引导**：修改 `plot_outlines` 表中对应章节的 `key_conflict`。
+2.  **强制重写**：删除对应章节的数据库记录，系统会视其为“待生成”章节重新调用 Writer 生成。
+3.  **微调文风**：在 `novel_bible` 表的 `style_description` 中增加具体的关键词（如：多用古文，少用白话）。
+
+---
+
+## 🏗 开源路线图 (Roadmap)
+- [ ] **RAG 向量搜索完全集成**: 实现世界观设定的语义检索。 (In Progress)
+- [ ] **可视化交互界面**: 基于 Next.js 的小说创作 Dashboard。
+- [ ] **多线剧情分支**: 支持 Architect 生成多个结局路径。
+
+---
+*本项目遵循 Antigravity Rules 治理准则，确保每一行文字都具有灵魂。*

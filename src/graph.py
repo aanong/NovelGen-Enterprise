@@ -22,9 +22,9 @@ class NGEGraph:
 
     def _build_graph(self):
         # 节点定义
-        self.workflow.add_node("load_context", self.load_context_node) # 新增：从DB加载最新上下文
+        self.workflow.add_node("load_context", self.load_context_node) 
         self.workflow.add_node("plan", self.plan_node)
-        self.workflow.add_node("refine_context", self.refine_context_node) # 新增：上下文精炼
+        self.workflow.add_node("refine_context", self.refine_context_node) 
         self.workflow.add_node("write", self.write_node)
         self.workflow.add_node("review", self.review_node)
         self.workflow.add_node("evolve", self.evolve_node)
@@ -55,26 +55,12 @@ class NGEGraph:
         print(f"--- LOADING CONTEXT (Chapter {state.current_plot_index + 1}) ---")
         db = SessionLocal()
         try:
-            # 1. 加载人物最新状态
-            chars = db.query(Character).all()
-            char_map = {}
-            for c in chars:
-                char_map[c.name] = {
-                    "name": c.name,
-                    "personality_traits": c.personality_traits,
-                    "current_mood": c.current_mood,
-                    "evolution_log": c.evolution_log,
-                    "status": c.status
-                    # relationships 需要单独处理或在 CharacterRelationship 表中查询
-                }
-            
-            # 2. 简单的将 DB 数据同步回 State (这里做简化处理，实际需要完整映射)
-            # state.characters = char_map 
-            
+            db_chars = db.query(Character).all()
+            # 同步数据库中的角色状态到内存 (简略示例)
             return {"next_action": "plan"}
         except Exception as e:
             print(f"Error loading context: {e}")
-            return {"next_action": "plan"} # Fallback
+            return {"next_action": "plan"}
         finally:
             db.close()
 
@@ -86,7 +72,7 @@ class NGEGraph:
             
             # 1. 检查 DB 是否已有大纲
             outline = db.query(PlotOutline).filter_by(
-                novel_id=1, # 假设单本小说 ID=1
+                novel_id=1, 
                 chapter_number=current_chapter_num
             ).first()
             
@@ -95,7 +81,7 @@ class NGEGraph:
                 instruction = f"Scene: {outline.scene_description}\nConflict: {outline.key_conflict}"
                 return {"next_action": "write", "review_feedback": instruction}
 
-            # 2. 如果没有，调用 Architect Agent 生成
+            # 2. 调用 Architect Agent 生成
             plan_data = await self.architect.plan_next_chapter(state)
             
             # 3. 存入 DB
@@ -112,37 +98,22 @@ class NGEGraph:
             return {"next_action": "refine_context", "review_feedback": plan_data["instruction"]}
         except Exception as e:
             print(f"Planning Error: {e}")
-            return {"next_action": "refine_context", "review_feedback": "Error in planning, proceeding with default."}
+            return {"next_action": "refine_context", "review_feedback": "Error in planning."}
         finally:
             db.close()
 
     async def refine_context_node(self, state: NGEState):
-        """
-        上下文精炼节点：
-        基于即将写的章节内容（state.review_feedback 中的 instruction），
-        从 VectorDB 中检索最相关的 '世界观设定' 和 '过往伏笔'，
-        替换掉 state.memory_context 中冗余的全局信息。
-        """
+        """上下文精炼 (Mock RAG)"""
         print("--- REFINING CONTEXT ---")
-        
-        # 模拟：实际应调用 RAG 检索
-        # query = state.review_feedback 
-        # relevant_docs = vector_store.similarity_search(query)
-        
-        # 假设检索到了关于“魂力测试”的特定规则
         refined_context = [
             "检索到的设定：魂力测试碑在受到攻击时会反弹力量。",
             "检索到的伏笔：主角口袋里有一块神秘的黑石。"
         ]
-        
-        # 更新 MemoryContext (这里仅做演示，实际应更新 state.memory_context 字段)
         print(f"Refined Context: {refined_context}")
-        
         return {"next_action": "write"}
 
     async def write_node(self, state: NGEState):
         print("--- WRITING CHAPTER ---")
-        # 正文撰写可以引入 RAG (在 WriterAgent 内部实现)，这里只负责调度
         draft = await self.writer.write_chapter(state, state.review_feedback)
         return {"current_draft": draft, "next_action": "review"}
 
@@ -152,25 +123,22 @@ class NGEGraph:
         try:
             review_result = await self.reviewer.review_draft(state, state.current_draft)
             
-            # 记录审计日志
             audit = LogicAudit(
-                chapter_id=None, # 尚未生成 Chapter ID
                 reviewer_role="Deepseek-Critic",
-                is_passed=review_result["passed"],
-                feedback=review_result["feedback"],
+                is_passed=review_result.get("passed", False),
+                feedback=review_result.get("feedback", "No feedback"),
                 logic_score=review_result.get("score", 0.0),
                 created_at=datetime.utcnow()
             )
             db.add(audit)
             db.commit()
 
-            if review_result["passed"]:
+            if review_result.get("passed"):
                 return {"next_action": "evolve", "review_feedback": "Passed"}
             else:
-                print(f"Draft failed review: {review_result['feedback']}")
                 return {
                     "next_action": "write", 
-                    "review_feedback": f"修正建议：{review_result['feedback']}",
+                    "review_feedback": f"修正建议：{review_result.get('feedback')}",
                     "retry_count": state.retry_count + 1
                 }
         finally:
@@ -180,10 +148,8 @@ class NGEGraph:
         print("--- EVOLVING CHARACTERS & SAVING ---")
         db = SessionLocal()
         try:
-            # 1. 触发人物演化
             evolution = await self.reviewer.evolve_characters(state, state.current_draft)
             
-            # 2. 持久化章节内容
             new_chapter = DBChapter(
                 novel_id=1,
                 chapter_number=state.current_plot_index + 1,
@@ -193,16 +159,10 @@ class NGEGraph:
                 logic_checked=True
             )
             db.add(new_chapter)
-            
-            # 3. 更新人物状态 (示例：更新 Mood)
-            # 实际应用中应解析 evolution 结果并更新 CharacterRelationship 表
-            # ...
-            
             db.commit()
             
-            new_index = state.current_plot_index + 1
             return {
-                "current_plot_index": new_index,
+                "current_plot_index": state.current_plot_index + 1,
                 "next_action": "finalize"
             }
         except Exception as e:
@@ -213,9 +173,12 @@ class NGEGraph:
             db.close()
 
     def should_continue(self, state: NGEState):
+        """Rule 5.1 & 5.2: 循环熔断机制"""
         if state.next_action == "evolve":
+            print("🟢 审核通过。")
             return "continue"
+        if state.retry_count >= 3:
+            print(f"🔴 熔断保护：已重试 {state.retry_count} 次，强制进入演化。")
+            return "continue"
+        print(f"🔄 准备第 {state.retry_count + 1} 次生成...")
         return "revise"
-
-if __name__ == "__main__":
-    pass
