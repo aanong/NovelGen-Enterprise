@@ -177,8 +177,12 @@ class NGEGraph:
         if state.next_action == "evolve":
             print("🟢 审核通过。")
             return "continue"
-        if state.retry_count >= 3:
+        if state.retry_count >= state.max_retry_limit:
             print(f"🔴 熔断保护：已重试 {state.retry_count} 次，强制进入演化。")
+            # 记录熔断事件到反重力上下文
+            state.antigravity_context.violated_rules.append(
+                f"Rule 5.2 Triggered: 第{state.current_plot_index + 1}章在第{state.retry_count}次重试后强制通过"
+            )
             return "continue"
         print(f"🔄 准备第 {state.retry_count + 1} 次生成...")
         return "revise"

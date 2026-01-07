@@ -7,6 +7,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from ..schemas.state import PlotPoint, NGEState
+from ..config import Config
+from ..utils import strip_think_tags, extract_json_from_text
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,12 +28,12 @@ class ArchitectAgent:
     利用 Deepseek 的推理能力防止剧情崩坏。
     """
     def __init__(self):
-        # 使用本地 Ollama (与 ReviewerAgent 一致) 或 DeepSeek 云端
+        # 使用配置文件中的设置
         self.llm = ChatOpenAI(
-            model="deepseek-r1:7b",
-            openai_api_key=os.getenv("DEEPSEEK_API_KEY") or "ollama",
-            openai_api_base="http://localhost:11434/v1",
-            temperature=0.3
+            model=Config.model.DEEPSEEK_MODEL,
+            openai_api_key=Config.model.DEEPSEEK_API_KEY,
+            openai_api_base=Config.model.DEEPSEEK_API_BASE,
+            temperature=Config.model.DEEPSEEK_ARCHITECT_TEMP
         )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
         self.plan_parser = PydanticOutputParser(pydantic_object=ChapterPlan)
@@ -63,7 +65,8 @@ class ArchitectAgent:
 
     async def plan_next_chapter(self, state: NGEState) -> Dict[str, Any]:
         """
-        写每一章前，Agent 必须回答：“这一章如何服务于主线？上一章的结尾是什么？”
+        写每一章前，Agent 必须回答："这一章如何服务于主线？上一章的结尾是什么？"
+        遵循 Rule 1.1: Gemini 为王，不得自行修改设定
         """
         if not state.plot_progress or state.current_plot_index >= len(state.plot_progress):
             current_point_info = "剧情自由发展阶段"
@@ -76,6 +79,9 @@ class ArchitectAgent:
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个剧情规划专家。任务是为即将撰写的章节制定详细的微型提纲。\n"
+                "【反重力规则警告】\n"
+                "- Rule 1.1: 严禁修改世界观设定，只能根据设定进行演绎\n"
+                "- Rule 2.2: 严禁自发导致人物性格突变或降智\n"
                 "必须输出 JSON 格式，包含 thinking, scene_description, key_conflict, instruction。\n"
                 "{format_instructions}"
             )),
@@ -95,13 +101,13 @@ class ArchitectAgent:
             response = await self.llm.ainvoke(prompt_value.to_messages())
             content_str = response.content
             
-            # Filter <think> tags (Rule 4.1)
-            content_str = re.sub(r'<think>.*?</think>', '', content_str, flags=re.DOTALL).strip()
+            # Rule 4.1: 使用工具函数过滤 <think> 标签
+            content_str = strip_think_tags(content_str)
             
-            # Robust JSON extraction
-            json_match = re.search(r'(\{.*\})', content_str, re.DOTALL)
-            if json_match:
-                plan_json = json.loads(json_match.group(1))
+            # 使用工具函数提取 JSON
+            plan_json = extract_json_from_text(content_str)
+            
+            if plan_json:
                 return {
                     "scene": plan_json.get("scene_description") or plan_json.get("scene", "未知场景"),
                     "conflict": plan_json.get("key_conflict") or plan_json.get("conflict", "未知冲突"),
