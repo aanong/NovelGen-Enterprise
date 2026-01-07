@@ -13,8 +13,8 @@ class WriterAgent:
     """
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro",
-            temperature=0.8, # 创作时温提高以增加灵活性
+            model="gemini-2.0-flash-exp",
+            temperature=0.8,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
 

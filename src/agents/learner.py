@@ -1,4 +1,7 @@
 import os
+import re
+import json
+
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
@@ -73,15 +76,107 @@ class LearnerAgent:
             ("human", "请解析以下文档：\n\n{content}")
         ])
 
-        chain = prompt | self.llm | self.parser
+        # We manually process the response to handle R1's <think> tags and potential parsing issues
+        input_data = {
+            "content": content,
+            "format_instructions": self.parser.get_format_instructions()
+        }
+        
+        prompt_value = prompt.format_prompt(**input_data)
+        response = await self.llm.ainvoke(prompt_value.to_messages())
+        content_str = response.content
+        
+        # Rule 4.1: Strip <think> tags
+        content_str = re.sub(r'<think>.*?</think>', '', content_str, flags=re.DOTALL).strip()
         
         try:
-            # 对于非常长的文档，可能需要分块处理。这里暂定为直接处理(Deepseek V3 context window is large enough)
-            result = await chain.ainvoke({
-                "content": content,
-                "format_instructions": self.parser.get_format_instructions()
-            })
+            # Try standard parsing first
+            result = self.parser.parse(content_str)
             return result
         except Exception as e:
-            print(f"❌ 解析文档失败: {e}")
+            print(f"⚠️ 初始解析失败，尝试深度修复 JSON 格式...")
+            # Try to find JSON block
+            json_match = re.search(r'(\{.*\})', content_str, re.DOTALL)
+            if json_match:
+                try:
+                    # langgraph/langchain might have already partially cleaned it, 
+                    # but let's be sure we get the JSON part
+                    json_text = json_match.group(1)
+                    raw_json = json.loads(json_text)
+                    
+                    # 1. Remap common mismatches (Fuzzy)
+                    for k in list(raw_json.keys()):
+                        k_low = k.lower()
+                        if ("chapter" in k_low or "outline" in k_low or "章节" in k_low) and "outlines" not in raw_json:
+                            raw_json["outlines"] = raw_json.pop(k)
+                        elif ("style" in k_low or k_low == "text") and "style" not in raw_json:
+                            raw_json["style"] = raw_json.pop(k)
+                        elif ("world" in k_low or "view" in k_low) and "world_view_items" not in raw_json:
+                            raw_json["world_view_items"] = raw_json.pop(k)
+                        elif ("character" in k_low) and "characters" not in raw_json:
+                            raw_json["characters"] = raw_json.pop(k)
+                    
+                    # 2. Fix characters
+                    if "characters" in raw_json:
+                        for char in raw_json["characters"]:
+                            if "relationship_summary" not in char:
+                                char["relationship_summary"] = "暂无明确关系说明"
+                    else:
+                        raw_json["characters"] = []
+                    
+                    # 3. Fix outlines
+                    if "outlines" in raw_json:
+                        for outline in raw_json["outlines"]:
+                            # Inner remapping
+                            for ok in list(outline.keys()):
+                                ok_low = ok.lower()
+                                if "desc" in ok_low and "scene_description" not in outline:
+                                    outline["scene_description"] = outline.pop(ok)
+                                elif "conflict" in ok_low and "key_conflict" not in outline:
+                                    outline["key_conflict"] = outline.pop(ok)
+                                elif "instruction" in ok_low and "instruction" not in outline:
+                                    pass # already good
+                            
+                            if "instruction" not in outline:
+                                outline["instruction"] = "请按照情节大纲进行创作，注意角色性格的一致性。"
+                            if "key_conflict" not in outline:
+                                outline["key_conflict"] = "核心冲突待展开"
+                            if "title" not in outline:
+                                outline["title"] = f"第 {outline.get('chapter_number', '?')} 章"
+                            if "scene_description" not in outline:
+                                outline["scene_description"] = "描述待补充"
+                            if "chapter_number" not in outline:
+                                outline["chapter_number"] = 0
+                    else:
+                        raw_json["outlines"] = []
+                    
+                    # 4. Fix style
+                    if "style" in raw_json:
+                        s = raw_json["style"]
+                        if not isinstance(s, dict): s = {"content": str(s)}
+                        
+                        # Inner remapping
+                        for sk in list(s.keys()):
+                            sk_low = sk.lower()
+                            if "tone" in sk_low and "tone" not in s: s["tone"] = s.pop(sk)
+                            elif "rhetoric" in sk_low and "rhetoric" not in s: s["rhetoric"] = s.pop(sk)
+                            elif "keyword" in sk_low and "keywords" not in s: s["keywords"] = s.pop(sk)
+                            elif ("example" in sk_low or "features" in sk_low) and "example_sentence" not in s: s["example_sentence"] = s.pop(sk)
+
+                        if "example_sentence" not in s: s["example_sentence"] = "暂无风格范例"
+                        if "rhetoric" not in s: s.setdefault("rhetoric", ["暂无修辞设定"])
+                        if "keywords" not in s: s.setdefault("keywords", ["暂无关键词"])
+                        if "tone" not in s: s["tone"] = "常规"
+                        raw_json["style"] = s
+                    else:
+                        raw_json["style"] = {"tone": "常规", "rhetoric": [], "keywords": [], "example_sentence": "未定义"}
+
+                    if "world_view_items" not in raw_json:
+                        raw_json["world_view_items"] = []
+
+                    return NovelSetupData.model_validate(raw_json)
+                except Exception as parse_error:
+                    print(f"❌ 深度解析仍然失败: {parse_error}")
+            
             raise e
+

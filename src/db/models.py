@@ -9,7 +9,7 @@ class StyleRef(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(1536))  # 假设使用 Gemini Embedding (1536维)
+    embedding = Column(JSON)  # Fallback: 使用 JSON 存储向量 (如果缺少 pgvector 扩展)
     source_author = Column(String(255))
     style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征 (避免使用 python 内置关键字 metadata)
 

@@ -1,4 +1,6 @@
 import os
+import re
+import json
 from typing import List, Dict, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -84,19 +86,32 @@ class ArchitectAgent:
             ))
         ])
         
-        chain = prompt | self.llm | self.plan_parser
+        input_data = {
+            "format_instructions": self.plan_parser.get_format_instructions()
+        }
+        
+        prompt_value = prompt.format_prompt(**input_data)
         try:
-            plan: ChapterPlan = await chain.ainvoke({
-                "format_instructions": self.plan_parser.get_format_instructions()
-            })
+            response = await self.llm.ainvoke(prompt_value.to_messages())
+            content_str = response.content
             
-            return {
-                "scene": plan.scene_description,
-                "conflict": plan.key_conflict,
-                "instruction": plan.instruction
-            }
+            # Filter <think> tags (Rule 4.1)
+            content_str = re.sub(r'<think>.*?</think>', '', content_str, flags=re.DOTALL).strip()
+            
+            # Robust JSON extraction
+            json_match = re.search(r'(\{.*\})', content_str, re.DOTALL)
+            if json_match:
+                plan_json = json.loads(json_match.group(1))
+                return {
+                    "scene": plan_json.get("scene_description") or plan_json.get("scene", "未知场景"),
+                    "conflict": plan_json.get("key_conflict") or plan_json.get("conflict", "未知冲突"),
+                    "instruction": plan_json.get("instruction", f"请继续写下一章。基于剧情点：{current_point_info}")
+                }
+            
+            raise ValueError(f"Could not find JSON in response: {content_str}")
+
         except Exception as e:
-            print(f"Plan Parsing Error: {e}")
+            print(f"Plan Error: {e}")
             # Fallback
             return {
                 "scene": "未知场景",

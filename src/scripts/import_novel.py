@@ -31,6 +31,24 @@ async def import_novel(file_path: str):
         print(f"❌ 解析过程出错: {e}")
         return
 
+    # Create tables if they don't exist
+    print("🛠 正在检查/创建数据库表...")
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+            print("✅ pgvector 扩展已就绪")
+    except Exception as e:
+        print(f"⚠️ 无法创建 pgvector 扩展 (可能权限不足或已存在): {e}")
+
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("✅ 数据库表已同步")
+    except Exception as e:
+        print(f"⚠️ 创建/同步数据库表时出错: {e}")
+        # Continue anyway, maybe tables already exist
+    
     db: Session = SessionLocal()
     try:
         # 1. 保存世界观 (Novel Bible)
