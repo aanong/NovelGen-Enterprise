@@ -1,7 +1,7 @@
 # NovelGen-Enterprise (NGE)
 
 基于 LangGraph 的企业级多智能体长篇小说生成系统 (Enterprise Novel Generation System)。
-本项目专为追求高质量、逻辑严密的长篇小说创作而设计，利用 **Deepseek-V3/R1** 进行底层逻辑规划，**Gemini-1.5/3 Pro** 进行文学性正文创作。
+本项目专为追求高质量、逻辑严密的长篇小说创作而设计，利用本地 **Deepseek** 进行底层逻辑规划，**Gemini-1.5/3 Pro** 进行文学性正文创作。
 
 ## 🌟 核心特性
 - **双模型深度协作 (Dual-Model Synergy)**: 
