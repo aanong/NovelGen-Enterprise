@@ -1,6 +1,6 @@
 from typing import TypedDict, Annotated, Sequence
 from langgraph.graph import StateGraph, END
-from .schemas.state import NGEState
+from .schemas.state import NGEState, WorldItemSchema
 from .agents.architect import ArchitectAgent
 from .agents.writer import WriterAgent
 from .agents.reviewer import ReviewerAgent
@@ -32,6 +32,9 @@ class NGEGraph:
         self.workflow.add_node("evolve", self.evolve_node)
         
         # 连线
+        self.workflow.add_node("repair", self.repair_node) 
+        
+        # 连线
         self.workflow.set_entry_point("load_context")
         self.workflow.add_edge("load_context", "plan")
         self.workflow.add_edge("plan", "refine_context")
@@ -44,29 +47,70 @@ class NGEGraph:
             self.should_continue,
             {
                 "continue": "evolve",
-                "revise": "write"
+                "revise": "write",
+                "repair": "repair"
             }
         )
         
+        self.workflow.add_edge("repair", "evolve")
         self.workflow.add_edge("evolve", END)
         
         self.app = self.workflow.compile()
 
     async def load_context_node(self, state: NGEState):
-        """从数据库加载/刷新当前的 State（如人物状态、世界观）"""
-        print(f"--- LOADING CONTEXT (Chapter {state.current_plot_index + 1}) ---")
+        """从数据库加载/刷新当前的 State（如人物状态、世界观、历史摘要）"""
+        current_ch = state.current_plot_index + 1
+        print(f"--- LOADING CONTEXT (Chapter {current_ch}) ---")
         
         # 启动性能会话
-        session_id = monitor.start_session(state.current_plot_index + 1)
+        monitor.start_session(current_ch)
         
         db = SessionLocal()
         try:
+            # 1. 同步角色状态
             db_chars = db.query(Character).all()
-            # 同步数据库中的角色状态到内存
             for c in db_chars:
                 if c.name in state.characters:
-                    state.characters[c.name].current_mood = c.current_mood
-                    state.characters[c.name].personality_traits = c.personality_traits or {}
+                    char = state.characters[c.name]
+                    char.current_mood = c.current_mood
+                    char.personality_traits = c.personality_traits or {}
+                    char.skills = c.skills or []
+                    char.assets = c.assets or {}
+                    
+                    # 同步背包
+                    char.inventory = [
+                        WorldItemSchema(
+                            name=item.name,
+                            description=item.description,
+                            rarity=item.rarity,
+                            powers=item.powers or {},
+                            location=item.location
+                        ) for item in c.inventory
+                    ]
+            
+            # 2. 同步全球物品
+            from .db.models import WorldItem
+            db_items = db.query(WorldItem).all()
+            state.world_items = [
+                WorldItemSchema(
+                    name=item.name,
+                    description=item.description,
+                    rarity=item.rarity,
+                    powers=item.powers or {},
+                    location=item.location
+                ) for item in db_items
+            ]
+            
+            # 3. Rule 3.1: 加载历史摘要 (最近 3 章)
+            recent_chapters = db.query(DBChapter).filter(
+                DBChapter.novel_id == 1,
+                DBChapter.chapter_number < current_ch
+            ).order_by(DBChapter.chapter_number.desc()).limit(3).all()
+            
+            # 按章节顺序排列 (由远及近)
+            summaries = [ch.summary for ch in reversed(recent_chapters) if ch.summary]
+            state.memory_context.recent_summaries = summaries
+            print(f"✅ 已加载 {len(summaries)} 条历史摘要。")
             
             return {"next_action": "plan"}
         except Exception as e:
@@ -87,10 +131,21 @@ class NGEGraph:
                 chapter_number=current_chapter_num
             ).first()
             
-            if outline and outline.status == "completed":
-                print(f"Found existing outline for Ch.{current_chapter_num}")
-                instruction = f"Scene: {outline.scene_description}\nConflict: {outline.key_conflict}"
-                return {"next_action": "write", "review_feedback": instruction}
+            if outline:
+                # 如果已有大纲（不管是 pending 还是 completed），直接复用
+                print(f"✅ 发现现有大纲 (Ch.{current_chapter_num}, Status: {outline.status})")
+                
+                # 如果是 pending 且内容为空，则可以调用 Agent 补充，但这里我们假设 import 已有内容
+                if not outline.scene_description or not outline.key_conflict:
+                    plan_data = await self.architect.plan_next_chapter(state)
+                    outline.scene_description = plan_data.get("scene", outline.scene_description)
+                    outline.key_conflict = plan_data.get("conflict", outline.key_conflict)
+                    db.commit()
+                    instruction = plan_data["instruction"]
+                else:
+                    instruction = f"Scene: {outline.scene_description}\nConflict: {outline.key_conflict}"
+                
+                return {"next_action": "refine_context", "review_feedback": instruction}
 
             # 2. 调用 Architect Agent 生成
             plan_data = await self.architect.plan_next_chapter(state)
@@ -190,29 +245,58 @@ class NGEGraph:
             
             # 1. 更新内存和 DB 中的角色状态
             for name, changes in evolution_data.items():
-                if name in state.characters:
+                if name == "summary":
+                    continue # Skip general summary field during character iteration
+                
+                if name in state.characters and isinstance(changes, dict):
                     char = state.characters[name]
+                    # 更新基本状态
                     char.current_mood = changes.get("new_mood", char.current_mood)
                     evol_log = f"Ch.{state.current_plot_index + 1}: {changes.get('evolution_summary', '')}"
                     char.evolution_log.append(evol_log)
+                    
+                    # 更新技能与资产 (如果有变化)
+                    if "new_skills" in changes and isinstance(changes["new_skills"], list):
+                        char.skills = list(set(char.skills + changes["new_skills"]))
+                    if "asset_changes" in changes and isinstance(changes["asset_changes"], dict):
+                        char.assets.update(changes["asset_changes"])
                     
                     # 同步到 DB
                     db_char = db.query(Character).filter_by(name=name).first()
                     if db_char:
                         db_char.current_mood = char.current_mood
                         db_char.evolution_log = char.evolution_log
+                        db_char.skills = char.skills
+                        db_char.assets = char.assets
+                        
+                        # 处理物品所有权变更 (例如：如果是 {"acquired_items": ["神源之心"]})
+                        if "acquired_items" in changes:
+                            from .db.models import WorldItem
+                            for item_name in changes["acquired_items"]:
+                                db_item = db.query(WorldItem).filter_by(name=item_name).first()
+                                if db_item:
+                                    db_item.owner_id = db_char.id
+                                    db_item.location = f"Character: {name}"
             
-            # 2. 保存章节
-            new_chapter = DBChapter(
-                novel_id=1,
-                chapter_number=state.current_plot_index + 1,
-                title=f"第 {state.current_plot_index + 1} 章",
-                content=state.current_draft,
-                summary=evolution_data.get("summary", ""),
-                created_at=datetime.utcnow(),
-                logic_checked=True
-            )
-            db.add(new_chapter)
+            # 2. 保存章节 (Upsert)
+            chapter_num = state.current_plot_index + 1
+            existing_chapter = db.query(DBChapter).filter_by(novel_id=1, chapter_number=chapter_num).first()
+            if existing_chapter:
+                existing_chapter.title = f"第 {chapter_num} 章"
+                existing_chapter.content = state.current_draft
+                existing_chapter.summary = evolution_data.get("summary", "")
+                existing_chapter.logic_checked = True
+            else:
+                new_chapter = DBChapter(
+                    novel_id=1,
+                    chapter_number=chapter_num,
+                    title=f"第 {chapter_num} 章",
+                    content=state.current_draft,
+                    summary=evolution_data.get("summary", ""),
+                    created_at=datetime.utcnow(),
+                    logic_checked=True
+                )
+                db.add(new_chapter)
             db.commit()
             
             # 3. 结束性能会话
@@ -231,17 +315,41 @@ class NGEGraph:
         finally:
             db.close()
 
+    async def repair_node(self, state: NGEState):
+        """Rule 5.2: Gemini 介入重写修复"""
+        print("🔴 触发 Rule 5.2：Gemini 执行强制修复...")
+        
+        # 利用 ReviewerAgent (现在是 Gemini) 进行修复
+        # 这里我们可以调用一个新的方法或者复用 review 方法的 logic，
+        # 但为了清晰，我们假设 ReviewerAgent 有一个 fix_draft 方法。
+        # 如果没有，我们就原位实现一个简单的 Prompt。
+        
+        prompt = (
+            f"你作为一个小说主编，现在需要对一份经过多次修改仍不合格的草稿进行最终修复。\n"
+            f"修改意见：{state.review_feedback}\n"
+            f"原始草稿：\n{state.current_draft}\n\n"
+            f"请直接给出修复后的完整正文，确保逻辑通顺，不再有之前的错误。"
+        )
+        
+        # 这里直接调用 reviewer 的 llm (Gemini)
+        response = await self.reviewer.llm.ainvoke(prompt)
+        fixed_draft = strip_think_tags(response.content)
+        
+        return {
+            "current_draft": fixed_draft,
+            "next_action": "evolve",
+            "review_feedback": "Fixed by Gemini (Rule 5.2)"
+        }
+
     def should_continue(self, state: NGEState):
         """Rule 5.1 & 5.2: 循环熔断机制"""
         if state.next_action == "evolve":
             print("🟢 审核通过。")
             return "continue"
+        
         if state.retry_count >= state.max_retry_limit:
-            print(f"🔴 熔断保护：已重试 {state.retry_count} 次，强制进入演化。")
-            # 记录熔断事件到反重力上下文
-            state.antigravity_context.violated_rules.append(
-                f"Rule 5.2 Triggered: 第{state.current_plot_index + 1}章在第{state.retry_count}次重试后强制通过"
-            )
-            return "continue"
+            print(f"🔴 熔断保护：已重试 {state.retry_count} 次，进入 Gemini 分级修复。")
+            return "repair"
+            
         print(f"🔄 准备第 {state.retry_count + 1} 次生成...")
         return "revise"

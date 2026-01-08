@@ -68,58 +68,21 @@ class SetupReviewer:
                 "## 一、逻辑漏洞检测与修复方案\n"
                 "[详细列出发现的所有逻辑问题，并为每个问题提供具体的修复方案]\n\n"
                 "## 二、修炼体系深度分析与重构\n"
-                "[评估修炼体系的完整性和合理性，必要时重构，并提供对照表]\n\n"
+                "[评估修炼体系，并提供一份清晰的对照表]\n\n"
                 "## 三、人物扩展与关系网\n"
-                "[基于现有人物，扩展以下内容：]\n"
-                "- **主要人物深化**：为现有角色补充背景故事、性格弧光、核心动机、禁忌与软肋\n"
-                "- **配角补充**：增加至少 80-120 个关键配角（盟友、敌人、导师、路人转折点、中立观察者）\n"
-                "- **反派体系**：构建完整的反派阶梯（炮灰 → 小BOSS → 中BOSS → 大BOSS → 最终BOSS）\n"
-                "- **人物关系图谱**：用表格形式展示所有人物的关系网（包括敌对度、好感度、利益关系）\n"
-                "- **命名规范**：所有新增人物必须参照《诗经》《易经》《楚辞》命名，并注明出处和寓意\n\n"
-                "## 四、世界地理深度扩展\n"
-                "[基于现有地理，扩展以下内容：]\n"
-                "- **核心区域详述**：为每个主要地点补充地理特征、气候、资源分布、势力控制、历史传说\n"
-                "- **新增地点**：补充至少 15-20 个关键地点，分类如下：\n"
-                "  * 修炼圣地（30-50个）：如洞天福地、灵脉汇聚之所\n"
-                "  * 禁地险境（10-15个）：如绝地、死域、时空乱流\n"
-                "  * 战场遗迹（20-30个）：上古战场、封印之地\n"
-                "  * 隐秘之所（20-30个）：秘境、异空间\n"
-                "  * 城市聚落（30-50个）：修仙坊市、凡人王朝\n"
-                "- **空间结构**：明确各区域的层级关系（如：凡界 → 灵界 → 神界 → 混沌）\n"
-                "- **传送体系**：说明角色如何在不同区域间移动（传送阵、空间裂缝、飞舟等）\n"
-                "- **异兽分布**：为每个区域配置特色异兽或神物（参考《山海经》《搜神记》）\n"
-                "- **命名规范**：所有地点必须参照《山海经》《淮南子》《楚辞》命名，并注明出处\n\n"
-                "## 五、势力扩展与政治格局\n"
-                "[基于现有势力，扩展以下内容：]\n"
-                "- **势力详述**：为每个势力补充组织架构、核心理念、历史渊源、招收标准、禁忌\n"
-                "- **新增势力**：补充至少 80 个势力，分类如下：\n"
-                "  * 正道宗门（20-30个）\n"
-                "  * 魔道势力（20-30个）\n"
-                "  * 中立组织（10-20个）\n"
-                "  * 隐世门派（10-20个）\n"
-                "- **势力关系图**：用表格展示各势力的敌对/盟友/中立关系，以及利益纠葛\n"
-                "- **权力平衡**：说明各势力如何制衡，避免一家独大\n"
-                "- **命名规范**：所有势力必须结合古典意象，体现其特质\n\n"
-                "- **势力分布**：将这些势力分布到每一个卷\n\n"
-                "## 六、完整章节目录（基于修复后的设定）\n"
-                "[根据修复后的逻辑漏洞、扩展后的人物关系和地理体系，生成完整的章节目录：]\n"
-                "- **格式要求**：\n"
-                "  * 分卷结构：第X卷：【卷名】（总章节数）\n"
-                "  * 每卷下列出所有章节：第X章：【章节名】 - 核心事件概述（1-2句话）\n"
-                "  * 标注关键转折点、高潮章节、伏笔埋设章节\n"
-                "- **内容要求**：\n"
-                "  * 确保每个扩展的人物都有出场章节\n"
-                "  * 确保每个关键地点都有对应的探索章节\n"
-                "  * 确保势力冲突有完整的铺垫-爆发-收尾流程\n"
-                "  * 总章节数建议：1000-1500章（长篇小说标准）\n\n"
-                "## 七、最终完善版设定文档\n"
-                "[输出修正后的完整设定文档，保持原格式，整合以上所有内容，包括：]\n"
-                "- 修复后的世界观\n"
-                "- 完整的人物列表（含新增角色）\n"
-                "- 完整的地理体系（含新增地点）\n"
-                "- 完整的势力体系\n"
+                "[补充关键角色，包括性格、动机和禁忌。主要配角不少于 20 个。]\n"
+                "- **命名规范**：参考《诗经》《易经》《楚辞》命名，注明出处。\n\n"
+                "## 四、世界地理与势力扩展\n"
+                "[补充 10 个关键地点和 5 个核心势力。]\n\n"
+                "## 五、完整章节大纲\n"
+                "[根据重构后的逻辑生成一份详细的大纲目录。要求：分卷结构，至少包含 20 个核心剧情转折点章节名及梗概。不要生成上千章无关紧要的列表，重点放在主线逻辑。]\n\n"
+                "## 六、最终完善版设定文档\n"
+                "**直接输出修正后的完整设定文本，内容需包含：**\n"
+                "- 完善后的世界观与核心规则\n"
+                "- 人物小传（含新增角色）\n"
                 "- 修炼体系对照表\n"
-                "- 文风要求"
+                "- 文风要求\n"
+                "（这段文字将直接作为生成程序的输入，请务必保证信息量充足且格式清晰）"
             ))
         ])
         
@@ -135,33 +98,65 @@ class SetupReviewer:
             "logic_fixes": self._extract_section(content, "一、逻辑漏洞检测与修复方案"),
             "cultivation_system": self._extract_section(content, "二、修炼体系深度分析与重构"),
             "character_expansion": self._extract_section(content, "三、人物扩展与关系网"),
-            "world_geography": self._extract_section(content, "四、世界地理深度扩展"),
-            "faction_politics": self._extract_section(content, "五、势力扩展与政治格局"),
-            "chapter_directory": self._extract_section(content, "六、完整章节目录"),
-            "final_setup": self._extract_section(content, "七、最终完善版设定文档")
+            "world_geography": self._extract_section(content, "四、世界地理与势力扩展"),
+            "chapter_directory": self._extract_section(content, "五、完整章节大纲"),
+            "final_setup": self._extract_section(content, "六、最终完善版设定文档")
         }
         
         return sections
     
     def _extract_section(self, content: str, section_title: str) -> str:
-        """从 Markdown 格式中提取特定章节"""
+        """
+        从 Markdown 格式中提取特定章节。
+        改进逻辑：不再简单地在遇到下一个 '## ' 时停止，而是根据 section_title 的特征进行匹配。
+        """
+        import re
+        
+        # 匹配标题的正则，如 "## 七、最终完善版设定文档"
+        # 允许标题前后有其他文字，只要包含关键词即可
+        escaped_title = re.escape(section_title)
+        pattern = rf"## .*?{escaped_title}.*?\n(.*?)(?=\n## |$)"
+        
+        match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+        if match:
+            extracted = match.group(1).strip()
+            # 清理可能的代码块包裹
+            if extracted.startswith("```markdown"):
+                extracted = extracted[11:].strip()
+            if extracted.startswith("```"):
+                extracted = extracted[3:].strip()
+            if extracted.endswith("```"):
+                extracted = extracted[:-3].strip()
+            
+            if extracted:
+                return extracted
+
+        # 回退逻辑：如果正则没匹配到，尝试精确匹配
         lines = content.split('\n')
         capturing = False
         result = []
         
         for line in lines:
-            if section_title in line:
+            if section_title in line and line.startswith('## '):
                 capturing = True
                 continue
             if capturing:
-                # 遇到下一个主标题就停止
-                if line.startswith('## ') and section_title not in line:
-                    break
+                # 只有在遇到另一个同级别的引导标题时才停止
+                # 引导标题通常带有一、二、三或数字编号
+                if line.startswith('## ') and re.search(r'[一二三四五六七八九十\d]', line):
+                    # 检查是否是真的下一个导航节，而不是内容中的子标题
+                    if section_title not in line:
+                        break
                 result.append(line)
         
         extracted = '\n'.join(result).strip()
         
-        # 如果是最终设定且为空，返回原始内容
+        # 清理代码块
+        if extracted.startswith("```"):
+            extracted = re.sub(r'^```(markdown)?\n', '', extracted)
+            extracted = re.sub(r'\n```$', '', extracted)
+
+        # 如果是最终设定且提取失败，最后尝试返回整个文档（作为保底）
         if not extracted and "最终完善版设定" in section_title:
             return content
         
@@ -197,11 +192,9 @@ async def main(input_file: str, output_dir: str = "./reviewed_setups"):
             f.write(result["cultivation_system"] + "\n\n")
             f.write("## 三、人物扩展与关系网\n")
             f.write(result["character_expansion"] + "\n\n")
-            f.write("## 四、世界地理深度扩展\n")
+            f.write("## 四、世界地理与势力扩展\n")
             f.write(result["world_geography"] + "\n\n")
-            f.write("## 五、势力扩展与政治格局\n")
-            f.write(result["faction_politics"] + "\n\n")
-            f.write("## 六、完整章节目录\n")
+            f.write("## 五、完整章节大纲\n")
             f.write(result["chapter_directory"] + "\n\n")
         
         print(f"✅ 审查报告已保存至: {report_path}")

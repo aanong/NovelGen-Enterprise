@@ -9,7 +9,7 @@ class StyleRef(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768)) # Gemini text-embedding-004 is 768 dimensions
+    embedding = Column(JSON) # Fallback to JSON if pgvector is not available
     source_author = Column(String(255))
     style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征
 
@@ -21,7 +21,7 @@ class NovelBible(Base):
     category = Column(String(100), index=True) 
     key = Column(String(255), unique=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768)) # 新增向量列
+    embedding = Column(JSON) # Fallback to JSON if pgvector is not available
     importance = Column(Integer, default=5)
     tags = Column(JSON)
     
@@ -37,12 +37,15 @@ class Character(Base):
     name = Column(String(255), unique=True, index=True, nullable=False)
     role = Column(String(100)) # 主角/配角/反派
     personality_traits = Column(JSON) # MBTI, BigFive, 核心动机, 缺陷
+    skills = Column(JSON)             # 功法、神技、被动技能
+    assets = Column(JSON)             # 灵石、地盘、声望等非实物资产
     evolution_log = Column(JSON)      # 章节成长记录
     current_mood = Column(String(100))
     status = Column(JSON)             # 当前生理/心理状态（受伤、狂喜等）
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    
+
     # 添加关系
+    inventory = relationship("WorldItem", back_populates="owner")
     relationships_as_a = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.char_a_id", back_populates="character_a", cascade="all, delete-orphan")
     relationships_as_b = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.char_b_id", back_populates="character_b", cascade="all, delete-orphan")
 
@@ -119,3 +122,17 @@ class LogicAudit(Base):
     
     # 添加关系
     chapter = relationship("Chapter", back_populates="audits")
+class WorldItem(Base):
+    """关键物品/法宝管理"""
+    __tablename__ = "world_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), unique=True, index=True, nullable=False)
+    description = Column(Text)
+    rarity = Column(String(100)) # 凡、灵、宝、仙、神
+    powers = Column(JSON)       # 物品的具体数值或特殊词条
+    owner_id = Column(Integer, ForeignKey("characters.id", ondelete="SET NULL"), nullable=True)
+    location = Column(String(255)) # 如果不在人身上，所在位置
+    is_unique = Column(Boolean, default=True)
+
+    owner = relationship("Character", back_populates="inventory")

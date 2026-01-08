@@ -2,7 +2,7 @@ import os
 import re
 import json
 from typing import List, Dict, Any
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -24,15 +24,15 @@ class ChapterPlan(BaseModel):
 
 class ArchitectAgent:
     """
-    Architect Agent (Deepseek): 负责剧情逻辑、大纲构建与拆解。
-    利用 Deepseek 的推理能力防止剧情崩坏。
+    Architect Agent (Gemini): 负责剧情逻辑、大纲构建与拆解。
+    利用 Gemini 的逻辑推演能力，确保世界观一致性。
+    遵循 Rule 1.1: Gemini 为王（底层逻辑最终解释权）
     """
     def __init__(self):
         # 使用配置文件中的设置
-        self.llm = ChatOpenAI(
-            model=Config.model.DEEPSEEK_MODEL,
-            openai_api_key=Config.model.DEEPSEEK_API_KEY,
-            openai_api_base=Config.model.DEEPSEEK_API_BASE,
+        self.llm = ChatGoogleGenerativeAI(
+            model=Config.model.GEMINI_MODEL,
+            google_api_key=Config.model.GEMINI_API_KEY,
             temperature=Config.model.DEEPSEEK_ARCHITECT_TEMP
         )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
@@ -76,6 +76,11 @@ class ArchitectAgent:
 
         last_summary = state.memory_context.recent_summaries[-1] if state.memory_context.recent_summaries else "开篇第一章"
         
+        char_info = "\n".join([
+            f"- {n}: 技能={', '.join(c.skills)}, 资产={json.dumps(c.assets, ensure_ascii=False)}, 物品={', '.join([i.name for i in c.inventory])}"
+            for n, c in state.characters.items()
+        ])
+        
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个剧情规划专家。任务是为即将撰写的章节制定详细的微型提纲。\n"
@@ -86,13 +91,17 @@ class ArchitectAgent:
                 "{format_instructions}"
             )),
             ("human", (
-                f"当前剧情点：\n{current_point_info}\n\n"
-                f"上一章总结：{last_summary}\n\n"
+                "当前活跃角色状态：\n{char_info}\n\n"
+                "当前剧情点：\n{current_point_info}\n\n"
+                "上一章总结：{last_summary}\n\n"
                 "请规划下一章详情。"
             ))
         ])
         
         input_data = {
+            "char_info": char_info,
+            "current_point_info": current_point_info,
+            "last_summary": last_summary,
             "format_instructions": self.plan_parser.get_format_instructions()
         }
         

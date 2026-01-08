@@ -8,9 +8,19 @@ class NovelBible(BaseModel):
     style_vector: Optional[List[float]] = Field(None, description="文风特征向量")
     style_description: Optional[StyleFeatures] = Field(None, description="文风详细特征描述")
 
+class WorldItemSchema(BaseModel):
+    name: str
+    description: str
+    rarity: str
+    powers: Dict[str, Any]
+    location: Optional[str] = None
+
 class character_state(BaseModel):
     name: str
     personality_traits: Dict[str, Any] # MBTI, BigFive
+    skills: List[str] = Field(default_factory=list, description="角色掌握的技能/功法")
+    assets: Dict[str, Any] = Field(default_factory=dict, description="角色拥有的非实物资产")
+    inventory: List[WorldItemSchema] = Field(default_factory=list, description="角色携带的物品")
     relationships: Dict[str, str]
     evolution_log: List[str]
     current_mood: str
@@ -48,6 +58,7 @@ class NGEState(BaseModel):
     """
     novel_bible: NovelBible
     characters: Dict[str, character_state]
+    world_items: List[WorldItemSchema] = Field(default_factory=list, description="世界中的关键物品（含在野和已领用的）")
     plot_progress: List[PlotPoint]
     current_plot_index: int = 0
     memory_context: MemoryContext
@@ -61,6 +72,7 @@ class NGEState(BaseModel):
     review_feedback: str = ""
     retry_count: int = 0
     max_retry_limit: int = 3  # Rule 5.1: 循环熔断阈值
+    refined_context: List[str] = Field(default_factory=list, description="本章动态检索精炼后的上下文（RAG）")
     
     # 版本控制与审计
     state_version: str = Field(default="1.0.0", description="状态版本号，用于回滚和调试")

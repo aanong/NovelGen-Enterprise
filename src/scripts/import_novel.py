@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from src.agents.learner import LearnerAgent
 from src.db.base import SessionLocal, engine, Base
-from src.db.models import Character, NovelBible, PlotOutline, StyleRef
+from src.db.models import Character, NovelBible, PlotOutline, StyleRef, WorldItem
 from src.utils import get_embedding
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -78,6 +78,8 @@ async def import_novel(file_path: str, use_llm: bool = True):
                 print("✅ pgvector 扩展已就绪")
             except Exception as e:
                 print(f"⚠️ 无法创建 pgvector 扩展: {e}")
+    except Exception as e:
+        print(f"⚠️ 数据库连接异常: {e}")
 
     try:
         Base.metadata.create_all(bind=engine)
@@ -89,64 +91,154 @@ async def import_novel(file_path: str, use_llm: bool = True):
     try:
         # 1. 保存世界观 (Novel Bible)
         for item in data.world_view_items:
-            category = getattr(item, "category", item.get("category"))
-            key = getattr(item, "key", item.get("key"))
-            content_text = getattr(item, "content", item.get("content"))
+            if isinstance(item, dict):
+                category = item.get("category", "设定")
+                key = item.get("key", "未知")
+                content_text = item.get("content", "")
+            else:
+                category = getattr(item, "category", "设定")
+                key = getattr(item, "key", "未知")
+                content_text = getattr(item, "content", "")
+
             print(f"  - 正在生成设定 Embedding: {key}...")
             emb = get_embedding(f"{key}: {content_text}")
-            bible = NovelBible(
-                category=category,
-                key=key,
-                content=content_text,
-                embedding=emb,
-                tags=[category]
-            )
-            db.add(bible)
+            
+            # Upsert
+            existing = db.query(NovelBible).filter_by(key=key).first()
+            if existing:
+                existing.category = category
+                existing.content = content_text
+                existing.embedding = emb
+                existing.tags = [category]
+            else:
+                bible = NovelBible(
+                    category=category,
+                    key=key,
+                    content=content_text,
+                    embedding=emb,
+                    tags=[category]
+                )
+                db.add(bible)
         db.commit()
         print(f"✔ 已导入 {len(data.world_view_items)} 条世界观设定")
 
         # 2. 保存角色 (Characters)
         for char in data.characters:
-            role = getattr(char, "role", char.get("role", ""))
-            personality = getattr(char, "personality", char.get("personality", ""))
-            background = getattr(char, "background", char.get("background", ""))
-            name = getattr(char, "name", char.get("name", "角色"))
+            if isinstance(char, dict):
+                name = char.get("name", "角色")
+                role = char.get("role", "")
+                personality = char.get("personality", "")
+                background = char.get("background", "")
+            else:
+                name = getattr(char, "name", "角色")
+                role = getattr(char, "role", "")
+                personality = getattr(char, "personality", "")
+                background = getattr(char, "background", "")
+                skills = getattr(char, "skills", [])
+                assets = getattr(char, "assets", {})
+            
             traits = {"role": role, "personality": personality, "background": background}
-            db_char = Character(
-                name=name,
-                role=role,
-                personality_traits=traits,
-                current_mood="平静",
-                evolution_log=["初始设定导入"],
-                status={"health": "healthy"}
-            )
-            db.add(db_char)
+            existing_char = db.query(Character).filter_by(name=name).first()
+            if existing_char:
+                existing_char.role = role
+                existing_char.personality_traits = traits
+                existing_char.skills = skills
+                existing_char.assets = assets
+            else:
+                db_char = Character(
+                    name=name,
+                    role=role,
+                    personality_traits=traits,
+                    skills=skills,
+                    assets=assets,
+                    current_mood="平静",
+                    evolution_log=["初始设定导入"],
+                    status={"health": "healthy"}
+                )
+                db.add(db_char)
         db.commit()
         print(f"✔ 已导入 {len(data.characters)} 个角色")
 
+        # 2.5 保存物品 (WorldItems)
+        char_map = {c.name: c.id for c in db.query(Character).all()}
+        for item in data.items:
+            if isinstance(item, dict):
+                i_name = item.get("name", "法宝")
+                i_desc = item.get("description", "")
+                i_rarity = item.get("rarity", "凡")
+                i_powers = item.get("powers", {})
+                i_owner = item.get("owner_name")
+                i_loc = item.get("location")
+            else:
+                i_name = getattr(item, "name", "法宝")
+                i_desc = getattr(item, "description", "")
+                i_rarity = getattr(item, "rarity", "凡")
+                i_powers = getattr(item, "powers", {})
+                i_owner = getattr(item, "owner_name", None)
+                i_loc = getattr(item, "location", None)
+            
+            owner_id = char_map.get(i_owner) if i_owner else None
+            existing_item = db.query(WorldItem).filter_by(name=i_name).first()
+            if existing_item:
+                existing_item.description = i_desc
+                existing_item.rarity = i_rarity
+                existing_item.powers = i_powers
+                existing_item.owner_id = owner_id
+                existing_item.location = i_loc
+            else:
+                db_item = WorldItem(
+                    name=i_name,
+                    description=i_desc,
+                    rarity=i_rarity,
+                    powers=i_powers,
+                    owner_id=owner_id,
+                    location=i_loc
+                )
+                db.add(db_item)
+        db.commit()
+        print(f"✔ 已导入 {len(data.items)} 个关键物品")
+
         # 3. 保存大纲 (PlotOutlines)
         for outline in data.outlines:
-            chapter_number = getattr(outline, "chapter_number", outline.get("chapter_number", 0))
-            scene_description = getattr(outline, "scene_description", outline.get("scene_description", ""))
-            key_conflict = getattr(outline, "key_conflict", outline.get("key_conflict", ""))
-            db_outline = PlotOutline(
-                novel_id=1,
-                chapter_number=chapter_number,
-                scene_description=scene_description,
-                key_conflict=key_conflict,
-                foreshadowing=[],
-                recalls=[],
-                status="pending"
-            )
-            db.add(db_outline)
+            if isinstance(outline, dict):
+                chapter_number = outline.get("chapter_number", 0)
+                scene_description = outline.get("scene_description", "")
+                key_conflict = outline.get("key_conflict", "")
+            else:
+                chapter_number = getattr(outline, "chapter_number", 0)
+                scene_description = getattr(outline, "scene_description", "")
+                key_conflict = getattr(outline, "key_conflict", "")
+
+            existing_outline = db.query(PlotOutline).filter_by(novel_id=1, chapter_number=chapter_number).first()
+            if existing_outline:
+                existing_outline.scene_description = scene_description
+                existing_outline.key_conflict = key_conflict
+            else:
+                db_outline = PlotOutline(
+                    novel_id=1,
+                    chapter_number=chapter_number,
+                    scene_description=scene_description,
+                    key_conflict=key_conflict,
+                    foreshadowing=[],
+                    recalls=[],
+                    status="pending"
+                )
+                db.add(db_outline)
         db.commit()
         print(f"✔ 已导入 {len(data.outlines)} 章大纲")
 
         # 4. 保存文风 (StyleRef)
-        tone = getattr(data.style, "tone", getattr(data.style, "get", lambda k, d=None: d)("tone", "常规"))
-        rhetoric = getattr(data.style, "rhetoric", getattr(data.style, "get", lambda k, d=None: d)("rhetoric", []))
-        example_sentence = getattr(data.style, "example_sentence", getattr(data.style, "get", lambda k, d=None: d)("example_sentence", ""))
-        keywords = getattr(data.style, "keywords", getattr(data.style, "get", lambda k, d=None: d)("keywords", []))
+        style = data.style
+        if isinstance(style, dict):
+            tone = style.get("tone", "常规")
+            rhetoric = style.get("rhetoric", [])
+            example_sentence = style.get("example_sentence", "")
+            keywords = style.get("keywords", [])
+        else:
+            tone = getattr(style, "tone", "常规")
+            rhetoric = getattr(style, "rhetoric", [])
+            example_sentence = getattr(style, "example_sentence", "")
+            keywords = getattr(style, "keywords", [])
         
         style_content = f"基调: {tone}\n修辞: {', '.join(rhetoric)}\n范例: {example_sentence}"
         print("  - 正在生成文风 Embedding...")

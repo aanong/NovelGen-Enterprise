@@ -2,7 +2,7 @@ import os
 import re
 import json
 from typing import Dict, Any, List
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from ..schemas.state import NGEState, character_state
 from ..config import Config
@@ -13,14 +13,14 @@ load_dotenv()
 
 class ReviewerAgent:
     """
-    Reviewer Agent (Deepseek): 负责逻辑审查、人物OOC检查及状态演化。
-    遵循 Rule 2.2: 逻辑与一致性守门人
+    Reviewer Agent (Gemini): 负责逻辑审查、人物OOC检查及状态演化。
+    作为【王】进行最后的裁决。
+    遵循 Rule 1.1 / 2.2: 逻辑与一致性守门人
     """
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model=Config.model.DEEPSEEK_MODEL,
-            openai_api_key=Config.model.DEEPSEEK_API_KEY,
-            openai_api_base=Config.model.DEEPSEEK_API_BASE,
+        self.llm = ChatGoogleGenerativeAI(
+            model=Config.model.GEMINI_MODEL,
+            google_api_key=Config.model.GEMINI_API_KEY,
             temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
         )
 
@@ -43,7 +43,7 @@ class ReviewerAgent:
                 "- 严禁人物性格突变 (OOC)\n"
                 "- 严禁逻辑硬伤\n"
                 "- 严禁修改已确定的世界观\n"
-                f"当前人物灵魂锚定：\n{character_rules}\n"
+                "当前人物灵魂锚定：\n{character_rules}\n"
                 "输出格式必须为 JSON。"
             )),
             ("human", (
@@ -56,10 +56,13 @@ class ReviewerAgent:
         
         last_summary = state.memory_context.recent_summaries[-1] if state.memory_context.recent_summaries else "开篇"
         
-        response = await self.llm.ainvoke(prompt.format(
+        # Use format_messages instead of format
+        messages = prompt.format_messages(
             draft=draft, 
-            summary=last_summary
-        ))
+            summary=last_summary,
+            character_rules=character_rules
+        )
+        response = await self.llm.ainvoke(messages)
         
         content_str = strip_think_tags(response.content)
         result = extract_json_from_text(content_str)
@@ -91,16 +94,32 @@ class ReviewerAgent:
             ("human", (
                 "角色初始状态：{char_states}\n"
                 "本章内容：\n{draft}\n\n"
-                "请生成每个角色的更新状态，必须包含字段：new_mood, evolution_summary, relationship_changes"
+                "请分析并返回 JSON，包含每个角色的更新状态。字段要求：\n"
+                "- new_mood: 变化后的心情描述\n"
+                "- evolution_summary: 本章成长/变化摘要\n"
+                "- new_skills: 本章习得的新技能列表 (若无则为空列表)\n"
+                "- asset_changes: 资产变动 (如 {{'灵石': -10}}) (若无则为空字典)\n"
+                "- acquired_items: 本章获得的关键物品名称列表 (若无则为空列表)\n"
+                "- relationship_changes: 关系变动描述\n"
+                "- summary: 整个章节的文字总结 (String)"
             ))
         ])
         
-        char_states = json.dumps({n: {"mood": c.current_mood, "personality": c.personality_traits} for n, c in state.characters.items()})
+        char_states = json.dumps({
+            n: {
+                "mood": c.current_mood, 
+                "personality": c.personality_traits,
+                "skills": c.skills,
+                "assets": c.assets,
+                "inventory": [i.name for i in c.inventory]
+            } for n, c in state.characters.items()
+        }, ensure_ascii=False)
         
-        response = await self.llm.ainvoke(prompt.format(
+        messages = prompt.format_messages(
             draft=draft,
             char_states=char_states
-        ))
+        )
+        response = await self.llm.ainvoke(messages)
         
         content_str = strip_think_tags(response.content)
         return extract_json_from_text(content_str) or {}

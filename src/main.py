@@ -2,7 +2,7 @@ import asyncio
 import argparse
 import sys
 import os
-from .schemas.state import NGEState, NovelBible, character_state, PlotPoint, MemoryContext
+from .schemas.state import NGEState, NovelBible, character_state, PlotPoint, MemoryContext, WorldItemSchema
 from .graph import NGEGraph
 from .schemas.style import StyleFeatures
 from .db.base import SessionLocal
@@ -38,9 +38,21 @@ async def main():
             # 转换人物
             characters = {}
             for c in db_chars:
+                inventory = [
+                    WorldItemSchema(
+                        name=item.name,
+                        description=item.description,
+                        rarity=item.rarity,
+                        powers=item.powers or {},
+                        location=item.location
+                    ) for item in c.inventory
+                ]
                 characters[c.name] = character_state(
                     name=c.name,
                     personality_traits=c.personality_traits or {},
+                    skills=c.skills or [],
+                    assets=c.assets or {},
+                    inventory=inventory,
                     relationships={}, # 基础导入暂不处理复杂关系
                     evolution_log=c.evolution_log or ["初始导入"],
                     current_mood=c.current_mood or "平静"
@@ -56,6 +68,19 @@ async def main():
                     key_events=[o.key_conflict]
                 ))
             
+            # 增加：转换世界物品
+            from .db.models import WorldItem
+            db_world_items = db.query(WorldItem).all()
+            world_items = [
+                WorldItemSchema(
+                    name=item.name,
+                    description=item.description,
+                    rarity=item.rarity,
+                    powers=item.powers or {},
+                    location=item.location
+                ) for item in db_world_items
+            ]
+            
             initial_state = NGEState(
                 novel_bible=NovelBible(
                     world_view=bible_content,
@@ -70,6 +95,7 @@ async def main():
                     )
                 ),
                 characters=characters,
+                world_items=world_items, # 新增
                 plot_progress=plot_progress,
                 memory_context=MemoryContext(
                     recent_summaries=["故事开篇"],
