@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.agents.learner import LearnerAgent
 from src.db.base import SessionLocal, engine, Base
 from src.db.models import Character, NovelBible, PlotOutline, StyleRef
+from src.utils import get_embedding
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
@@ -91,10 +92,13 @@ async def import_novel(file_path: str, use_llm: bool = True):
             category = getattr(item, "category", item.get("category"))
             key = getattr(item, "key", item.get("key"))
             content_text = getattr(item, "content", item.get("content"))
+            print(f"  - 正在生成设定 Embedding: {key}...")
+            emb = get_embedding(f"{key}: {content_text}")
             bible = NovelBible(
                 category=category,
                 key=key,
                 content=content_text,
+                embedding=emb,
                 tags=[category]
             )
             db.add(bible)
@@ -143,8 +147,14 @@ async def import_novel(file_path: str, use_llm: bool = True):
         rhetoric = getattr(data.style, "rhetoric", getattr(data.style, "get", lambda k, d=None: d)("rhetoric", []))
         example_sentence = getattr(data.style, "example_sentence", getattr(data.style, "get", lambda k, d=None: d)("example_sentence", ""))
         keywords = getattr(data.style, "keywords", getattr(data.style, "get", lambda k, d=None: d)("keywords", []))
+        
+        style_content = f"基调: {tone}\n修辞: {', '.join(rhetoric)}\n范例: {example_sentence}"
+        print("  - 正在生成文风 Embedding...")
+        style_emb = get_embedding(style_content)
+        
         style_ref = StyleRef(
-            content=f"基调: {tone}\n修辞: {', '.join(rhetoric)}\n范例: {example_sentence}",
+            content=style_content,
+            embedding=style_emb,
             source_author="Initial Import",
             style_metadata={"tone": tone, "keywords": keywords}
         )

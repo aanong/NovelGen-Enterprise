@@ -15,6 +15,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
+from ..config import Config
+
 load_dotenv()
 
 
@@ -23,9 +25,9 @@ class SetupReviewer:
     
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(
-            model="models/gemini-3-pro-preview",
-            temperature=0.3,  # 审查时需要更严谨
-            google_api_key=os.getenv("GOOGLE_API_KEY")
+            model=Config.model.SETUP_REVIEWER_MODEL,
+            temperature=Config.model.SETUP_REVIEWER_TEMP,
+            google_api_key=Config.model.GEMINI_API_KEY
         )
     
     async def review_and_enhance(self, raw_setup: str) -> dict:

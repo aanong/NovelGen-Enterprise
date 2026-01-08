@@ -9,20 +9,21 @@ class StyleRef(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(JSON)  # Fallback: 使用 JSON 存储向量 (如果缺少 pgvector 扩展)
+    embedding = Column(Vector(768)) # Gemini text-embedding-004 is 768 dimensions
     source_author = Column(String(255))
-    style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征 (避免使用 python 内置关键字 metadata)
+    style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征
 
 class NovelBible(Base):
     """世界观/设定集 (Novel Bible)"""
     __tablename__ = "novel_bible"
 
     id = Column(Integer, primary_key=True, index=True)
-    category = Column(String(100), index=True) # 如：地理, 战力体系, 关键道具, 历史背景
+    category = Column(String(100), index=True) 
     key = Column(String(255), unique=True, index=True)
     content = Column(Text, nullable=False)
-    importance = Column(Integer, default=5) # 1-10, 决定 RAG 检索时的权重
-    tags = Column(JSON) # 用于联想检索
+    embedding = Column(Vector(768)) # 新增向量列
+    importance = Column(Integer, default=5)
+    tags = Column(JSON)
     
     # 添加复合索引以优化按 category + importance 查询
     __table_args__ = (

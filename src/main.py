@@ -1,12 +1,24 @@
 import asyncio
+import argparse
+import sys
+import os
 from .schemas.state import NGEState, NovelBible, character_state, PlotPoint, MemoryContext
 from .graph import NGEGraph
 from .schemas.style import StyleFeatures
 from .db.base import SessionLocal
 from .db.models import NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle
-import json
+from .scripts.import_novel import import_novel
 
 async def main():
+    parser = argparse.ArgumentParser(description="NovelGen-Enterprise (NGE) CLI")
+    parser.add_argument("--init", type=str, help="从文档初始化小说数据 (路径)")
+    parser.add_argument("--run", action="store_true", help="运行章节生成任务")
+    args = parser.parse_args()
+
+    if args.init:
+        await import_novel(args.init)
+        return
+
     # 1. 尝试从数据库加载初始状态
     db = SessionLocal()
     initial_state = None
@@ -104,18 +116,22 @@ async def main():
     #     )
 
     # 2. 启动 LangGraph
-    print("🚀 启动 NovelGen-Enterprise (NGE) 生成引擎...")
-    graph = NGEGraph()
-    
-    # 3. 运行（默认运行当前进度对应的章节）
-    final_state = await graph.app.ainvoke(initial_state)
-    
-    print("\n" + "="*50)
-    print("✅ 章节生成任务完成！")
-    print(f"当前进度：第 {final_state['current_plot_index']} 章节点已处理")
-    print("生成样章片段（前200字）：")
-    print(final_state['current_draft'][:200])
-    print("="*50)
+    if args.run:
+        print("🚀 启动 NovelGen-Enterprise (NGE) 生成引擎...")
+        graph = NGEGraph()
+        
+        # 3. 运行（默认运行当前进度对应的章节）
+        final_state = await graph.app.ainvoke(initial_state)
+        
+        print("\n" + "="*50)
+        print("✅ 章节生成任务完成！")
+        print(f"当前进度：第 {final_state['current_plot_index']} 章节点已处理")
+        print("生成样章片段（前200字）：")
+        print(final_state['current_draft'][:200])
+        print("="*50)
+    else:
+        print("\n💡 提示: 使用 --init <file> 初始化小说，使用 --run 开始生成。")
+        print("示例: python -m src.main --run")
 
 if __name__ == "__main__":
     asyncio.run(main())

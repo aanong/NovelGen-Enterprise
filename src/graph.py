@@ -7,6 +7,8 @@ from .agents.reviewer import ReviewerAgent
 from .agents.style_analyzer import StyleAnalyzer
 from .db.base import SessionLocal
 from .db.models import NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter
+from .db.vector_store import VectorStore
+from .monitoring import monitor
 import json
 from datetime import datetime
 
@@ -53,10 +55,19 @@ class NGEGraph:
     async def load_context_node(self, state: NGEState):
         """从数据库加载/刷新当前的 State（如人物状态、世界观）"""
         print(f"--- LOADING CONTEXT (Chapter {state.current_plot_index + 1}) ---")
+        
+        # 启动性能会话
+        session_id = monitor.start_session(state.current_plot_index + 1)
+        
         db = SessionLocal()
         try:
             db_chars = db.query(Character).all()
-            # 同步数据库中的角色状态到内存 (简略示例)
+            # 同步数据库中的角色状态到内存
+            for c in db_chars:
+                if c.name in state.characters:
+                    state.characters[c.name].current_mood = c.current_mood
+                    state.characters[c.name].personality_traits = c.personality_traits or {}
+            
             return {"next_action": "plan"}
         except Exception as e:
             print(f"Error loading context: {e}")
@@ -103,14 +114,41 @@ class NGEGraph:
             db.close()
 
     async def refine_context_node(self, state: NGEState):
-        """上下文精炼 (Mock RAG)"""
-        print("--- REFINING CONTEXT ---")
-        refined_context = [
-            "检索到的设定：魂力测试碑在受到攻击时会反弹力量。",
-            "检索到的伏笔：主角口袋里有一块神秘的黑石。"
-        ]
-        print(f"Refined Context: {refined_context}")
-        return {"next_action": "write"}
+        """上下文精炼 (Real RAG Implementation)"""
+        print("--- REFINING CONTEXT VIA RAG ---")
+        
+        # 1. 获取当前规划的场景描述作为 Query
+        query = state.review_feedback # 在 plan 节点中，instruction 或 plan_data 被存入 review_feedback
+        
+        vs = VectorStore()
+        try:
+            # 2. 检索相关世界观
+            bible_results = await vs.search_bible(query, top_k=3)
+            bible_context = "\n".join([f"[{b['key']}]: {b['content']}" for b in bible_results])
+            
+            # 3. 检索相关文风范例
+            style_results = await vs.search_style(query, top_k=1)
+            style_context = style_results[0]['content'] if style_results else "常规文风"
+            
+            print(f"✅ RAG 检索完成。找到 {len(bible_results)} 条相关设定。")
+            
+            # 4. 更新 State 中的提示词
+            # 将检索到的内容注入到 review_feedback 中，供 Writer 使用
+            enhanced_instruction = (
+                f"{state.review_feedback}\n\n"
+                f"【参考世界观设定】\n{bible_context}\n\n"
+                f"【文风参考范例】\n{style_context}"
+            )
+            
+            return {
+                "next_action": "write",
+                "review_feedback": enhanced_instruction
+            }
+        except Exception as e:
+            print(f"RAG Error: {e}")
+            return {"next_action": "write"}
+        finally:
+            vs.close()
 
     async def write_node(self, state: NGEState):
         print("--- WRITING CHAPTER ---")
@@ -148,25 +186,46 @@ class NGEGraph:
         print("--- EVOLVING CHARACTERS & SAVING ---")
         db = SessionLocal()
         try:
-            evolution = await self.reviewer.evolve_characters(state, state.current_draft)
+            evolution_data = await self.reviewer.evolve_characters(state, state.current_draft)
             
+            # 1. 更新内存和 DB 中的角色状态
+            for name, changes in evolution_data.items():
+                if name in state.characters:
+                    char = state.characters[name]
+                    char.current_mood = changes.get("new_mood", char.current_mood)
+                    evol_log = f"Ch.{state.current_plot_index + 1}: {changes.get('evolution_summary', '')}"
+                    char.evolution_log.append(evol_log)
+                    
+                    # 同步到 DB
+                    db_char = db.query(Character).filter_by(name=name).first()
+                    if db_char:
+                        db_char.current_mood = char.current_mood
+                        db_char.evolution_log = char.evolution_log
+            
+            # 2. 保存章节
             new_chapter = DBChapter(
                 novel_id=1,
                 chapter_number=state.current_plot_index + 1,
-                title=f"Chapter {state.current_plot_index + 1}",
+                title=f"第 {state.current_plot_index + 1} 章",
                 content=state.current_draft,
+                summary=evolution_data.get("summary", ""),
                 created_at=datetime.utcnow(),
                 logic_checked=True
             )
             db.add(new_chapter)
             db.commit()
             
+            # 3. 结束性能会话
+            monitor.end_session(state.current_plot_index, success=True, retry_count=state.retry_count)
+            monitor.print_summary()
+
             return {
                 "current_plot_index": state.current_plot_index + 1,
-                "next_action": "finalize"
+                "next_action": "finalize",
+                "retry_count": 0 # 重置章节重试计数
             }
         except Exception as e:
-            print(f"Save Error: {e}")
+            print(f"Save & Evolve Error: {e}")
             db.rollback()
             return {"next_action": "finalize"}
         finally:

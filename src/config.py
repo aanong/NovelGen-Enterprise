@@ -61,6 +61,9 @@ class ModelConfig:
     # Setup Reviewer 配置
     SETUP_REVIEWER_MODEL = os.getenv("SETUP_REVIEWER_MODEL", "models/gemini-3-pro-preview")
     SETUP_REVIEWER_TEMP = float(os.getenv("SETUP_REVIEWER_TEMP", "0.3"))
+    
+    # Embedding 模型配置
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/text-embedding-004")
 
 
 class DatabaseConfig:

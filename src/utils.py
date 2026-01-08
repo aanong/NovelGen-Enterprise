@@ -6,6 +6,22 @@ import re
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import google.generativeai as genai
+from .config import Config
+
+genai.configure(api_key=Config.model.GEMINI_API_KEY)
+
+
+def get_embedding(text: str) -> List[float]:
+    """
+    使用 Gemini 模型获取文本的 Embedding 向量
+    """
+    result = genai.embed_content(
+        model=Config.model.EMBEDDING_MODEL,
+        content=text,
+        task_type="retrieval_document"
+    )
+    return result['embedding']
 
 
 def strip_think_tags(content: str) -> str:

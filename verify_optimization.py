@@ -220,6 +220,36 @@ def test_monitoring():
         return False
 
 
+def test_vector_store():
+    """测试 VectorStore 和 RAG 功能"""
+    print("\n🔍 测试 7: 检查 VectorStore 和 RAG...")
+    
+    try:
+        from src.db.vector_store import VectorStore
+        from src.utils import get_embedding
+        
+        # 1. 测试 Embedding 获取
+        # 注意: 这需要联网且有 API_KEY，如果验证脚本在离线环境运行可能会失败
+        # 这里仅检查函数是否存在
+        assert callable(get_embedding), "get_embedding 函数不可调用"
+        print("  ✅ get_embedding 函数已就绪")
+        
+        # 2. 检查 VectorStore 实例
+        vs = VectorStore()
+        print(f"  ✅ VectorStore 已实例化 (pgvector 支持: {vs.has_pgvector})")
+        
+        # 3. 检查检索方法
+        assert hasattr(vs, 'search_bible'), "VectorStore 缺少 search_bible 方法"
+        assert hasattr(vs, 'search_style'), "VectorStore 缺少 search_style 方法"
+        print("  ✅ RAG 检索接口描述正确")
+        
+        vs.close()
+        return True
+    except Exception as e:
+        print(f"  ❌ VectorStore 测试失败: {e}")
+        return False
+
+
 def main():
     """运行所有测试"""
     print("="*60)
@@ -233,6 +263,7 @@ def main():
         ("状态Schema", test_state_schema),
         ("数据库模型", test_database_models),
         ("性能监控", test_monitoring),
+        ("向量检索/RAG", test_vector_store),
     ]
     
     results = []
