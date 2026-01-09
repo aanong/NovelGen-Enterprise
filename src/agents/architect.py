@@ -22,6 +22,16 @@ class ChapterPlan(BaseModel):
     key_conflict: str = Field(description="核心冲突点与高潮")
     instruction: str = Field(description="给 Writer Agent 的具体写作指令，包含语气、视角要求")
 
+class ChapterOutline(BaseModel):
+    chapter_number: int = Field(description="章节序号")
+    title: str = Field(description="章节标题")
+    scene_description: str = Field(description="核心场面调度描述")
+    key_conflict: str = Field(description="核心冲突点与高潮")
+    foreshadowing: List[str] = Field(default_factory=list, description="本章埋下的伏笔")
+
+class FullNovelOutline(BaseModel):
+    chapters: List[ChapterOutline] = Field(description="全书分章大纲列表")
+
 class ArchitectAgent:
     """
     Architect Agent (Gemini): 负责剧情逻辑、大纲构建与拆解。
@@ -37,6 +47,84 @@ class ArchitectAgent:
         )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
         self.plan_parser = PydanticOutputParser(pydantic_object=ChapterPlan)
+        self.full_outline_parser = PydanticOutputParser(pydantic_object=FullNovelOutline)
+
+    async def generate_chapter_outlines(self, synopsis: str, world_view: str, total_chapters: int = 10) -> List[ChapterOutline]:
+        """
+        Rule 3.4: 全书大纲预生成
+        将核心梗概拆解为具体的分章大纲。
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", (
+                "你是一个网文总策划。任务是将一个简短的故事梗概拆解为详细的分章大纲。\n"
+                "【要求】\n"
+                "1. 总共生成约 {total_chapters} 章。\n"
+                "2. 每一章都要有明确的冲突和推进。\n"
+                "3. 严格遵守世界观设定：{world_view}\n"
+                "4. 确保剧情节奏张弛有度（起承转合）。\n"
+                "输出格式必须为 JSON。\n"
+                "{format_instructions}"
+            )),
+            ("human", "故事梗概：\n{synopsis}")
+        ])
+
+        chain = prompt | self.llm | self.full_outline_parser
+        try:
+            result = await chain.ainvoke({
+                "world_view": world_view,
+                "synopsis": synopsis,
+                "total_chapters": total_chapters,
+                "format_instructions": self.full_outline_parser.get_format_instructions()
+            })
+            return result.chapters
+        except Exception as e:
+            print(f"Outline Generation Error: {e}")
+            return []
+
+    async def refine_outline(self, current_outlines: List[Dict[str, Any]], instruction: str, start_chapter: int, world_view: str) -> List[ChapterOutline]:
+        """
+        调整现有大纲：从 start_chapter 开始，根据 instruction 重新规划后续章节。
+        """
+        # 提取前文摘要（start_chapter 之前的内容）
+        context_summary = "\n".join([
+            f"第 {o['chapter_number']} 章: {o['scene_description']}" 
+            for o in current_outlines if o['chapter_number'] < start_chapter
+        ])
+        
+        remaining_chapters = len(current_outlines) - (start_chapter - 1)
+        if remaining_chapters < 1:
+            remaining_chapters = 5 # 默认续写 5 章
+            
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", (
+                "你是一个网文主编。任务是根据修改意见，重新规划小说后续的大纲。\n"
+                "【前情提要】\n{context_summary}\n\n"
+                "【修改要求】\n{instruction}\n\n"
+                "【世界观】\n{world_view}\n\n"
+                "请从第 {start_chapter} 章开始，重新生成约 {remaining_chapters} 章的大纲。\n"
+                "输出格式必须为 JSON。\n"
+                "{format_instructions}"
+            )),
+            ("human", "请开始重新规划。")
+        ])
+        
+        chain = prompt | self.llm | self.full_outline_parser
+        try:
+            result = await chain.ainvoke({
+                "context_summary": context_summary,
+                "instruction": instruction,
+                "world_view": world_view,
+                "start_chapter": start_chapter,
+                "remaining_chapters": remaining_chapters,
+                "format_instructions": self.full_outline_parser.get_format_instructions()
+            })
+            # 修正章节号，确保连续
+            for i, ch in enumerate(result.chapters):
+                ch.chapter_number = start_chapter + i
+            return result.chapters
+        except Exception as e:
+            print(f"Outline Refinement Error: {e}")
+            return []
 
     async def expand_outline(self, user_prompt: str, world_view: str) -> List[PlotPoint]:
         """
