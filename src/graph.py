@@ -5,10 +5,12 @@ from .agents.architect import ArchitectAgent
 from .agents.writer import WriterAgent
 from .agents.reviewer import ReviewerAgent
 from .agents.style_analyzer import StyleAnalyzer
+from .agents.evolver import CharacterEvolver
 from .db.base import SessionLocal
-from .db.models import NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter
+from .db.models import Novel, NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter, WorldItem
 from .db.vector_store import VectorStore
 from .monitoring import monitor
+from .utils import strip_think_tags
 import json
 from datetime import datetime
 
@@ -18,6 +20,7 @@ class NGEGraph:
         self.writer = WriterAgent()
         self.reviewer = ReviewerAgent()
         self.analyzer = StyleAnalyzer()
+        self.evolver = CharacterEvolver()
         
         self.workflow = StateGraph(NGEState)
         self._build_graph()
@@ -89,7 +92,6 @@ class NGEGraph:
                     ]
             
             # 2. 同步全球物品
-            from .db.models import WorldItem
             db_items = db.query(WorldItem).all()
             state.world_items = [
                 WorldItemSchema(
@@ -109,7 +111,7 @@ class NGEGraph:
             if not start_chapter_id:
                 # 如果没有指定起点，尝试查找当前分支的最新章节
                 latest_chapter = db.query(DBChapter).filter(
-                    DBChapter.novel_id == 1,
+                    DBChapter.novel_id == state.current_novel_id,
                     DBChapter.branch_id == state.current_branch,
                     DBChapter.chapter_number < current_ch
                 ).order_by(DBChapter.chapter_number.desc()).first()
@@ -147,7 +149,7 @@ class NGEGraph:
             
             # 1. 检查 DB 是否已有大纲 (匹配 branch_id)
             outline = db.query(PlotOutline).filter_by(
-                novel_id=1, 
+                novel_id=state.current_novel_id, 
                 chapter_number=current_chapter_num,
                 branch_id=state.current_branch
             ).first()
@@ -173,7 +175,7 @@ class NGEGraph:
             
             # 3. 存入 DB
             new_outline = PlotOutline(
-                novel_id=1,
+                novel_id=state.current_novel_id,
                 chapter_number=current_chapter_num,
                 branch_id=state.current_branch,
                 scene_description=plan_data.get("scene", "Generated Scene"),
@@ -260,153 +262,130 @@ class NGEGraph:
             db.close()
 
     async def evolve_node(self, state: NGEState):
-        print("--- EVOLVING CHARACTERS & SAVING ---")
+        """
+        最终确定本章内容，并根据内容演化角色状态。
+        遵循 Rule 3.2 (人物立体与成长)。
+        """
+        print("--- EVOLVING CHARACTERS & FINALIZING CHAPTER ---")
         db = SessionLocal()
         try:
-            evolution_data = await self.reviewer.evolve_characters(state, state.current_draft)
+            # 1. 调用 Evolver Agent 分析人物变化
+            # 这里统一使用 self.evolver，它应该返回结构化的演化数据
+            evolution_result = await self.evolver.evolve(state)
             
-            # 1. 更新内存和 DB 中的角色状态
-            for name, changes in evolution_data.items():
-                if name == "summary":
-                    continue # Skip general summary field during character iteration
-                
-                if name in state.characters and isinstance(changes, dict):
-                    char = state.characters[name]
-                    # 更新基本状态
-                    char.current_mood = changes.get("new_mood", char.current_mood)
-                    evol_log = f"Ch.{state.current_plot_index + 1}: {changes.get('evolution_summary', '')}"
-                    char.evolution_log.append(evol_log)
-                    
-                    # 更新技能与资产 (如果有变化)
-                    if "new_skills" in changes and isinstance(changes["new_skills"], list):
-                        char.skills = list(set(char.skills + changes["new_skills"]))
-                    if "asset_changes" in changes and isinstance(changes["asset_changes"], dict):
-                        char.assets.update(changes["asset_changes"])
-                    
-                    # 同步到 DB
-                    db_char = db.query(Character).filter_by(name=name).first()
-                    if db_char:
-                        db_char.current_mood = char.current_mood
-                        db_char.evolution_log = char.evolution_log
-                        db_char.skills = char.skills
-                        db_char.assets = char.assets
-                        
-                        # 处理物品所有权变更 (例如：如果是 {"acquired_items": ["神源之心"]})
-                        if "acquired_items" in changes:
-                            from .db.models import WorldItem
-                            for item_name in changes["acquired_items"]:
-                                db_item = db.query(WorldItem).filter_by(name=item_name).first()
-                                if db_item:
-                                    db_item.owner_id = db_char.id
-                                    db_item.location = f"Character: {name}"
-                        
-                        # 处理物品丢失/消耗
-                        if "lost_items" in changes:
-                            from .db.models import WorldItem
-                            for item_name in changes["lost_items"]:
-                                db_item = db.query(WorldItem).filter_by(name=item_name).first()
-                                if db_item and db_item.owner_id == db_char.id:
-                                    db_item.owner_id = None
-                                    db_item.location = "Lost/Consumed"
+            char_map = {c.name: c for c in db.query(Character).filter(Character.novel_id == state.current_novel_id).all()}
 
-                        # 处理关系变更
-                        if "relationship_changes" in changes:
-                            for rel_change in changes["relationship_changes"]:
-                                target_name = rel_change.get("target")
-                                change_type = rel_change.get("change_type")
-                                value = rel_change.get("value", 0.0)
-                                
-                                target_char = db.query(Character).filter_by(name=target_name).first()
-                                if target_char:
-                                    # 查找现有关系 (A-B 或 B-A)
-                                    rel = db.query(CharacterRelationship).filter(
-                                        ((CharacterRelationship.char_a_id == db_char.id) & (CharacterRelationship.char_b_id == target_char.id)) |
-                                        ((CharacterRelationship.char_a_id == target_char.id) & (CharacterRelationship.char_b_id == db_char.id))
-                                    ).first()
-                                    
-                                    if not rel:
-                                        rel = CharacterRelationship(
-                                            char_a_id=db_char.id,
-                                            char_b_id=target_char.id,
-                                            relation_type="Neutral",
-                                            intimacy=0.0,
-                                            history=[]
-                                        )
-                                        db.add(rel)
-                                    
-                                    # 更新亲密度
-                                    rel.intimacy = max(-1.0, min(1.0, rel.intimacy + value))
-                                    # 记录历史
-                                    if not rel.history: rel.history = []
-                                    # 确保 history 是列表
-                                    if isinstance(rel.history, str):
-                                        try:
-                                            rel.history = json.loads(rel.history)
-                                        except:
-                                            rel.history = []
-                                    
-                                    # 使用 list.append 而不是重新赋值，以确保 SQLAlchemy 追踪变更 (对于 JSON 类型有时需要 flag_modified，但这里重新赋值给 rel.history 应该可以)
-                                    new_history = list(rel.history)
-                                    new_history.append({
-                                        "chapter": state.current_plot_index + 1,
-                                        "event": change_type,
-                                        "change": value
-                                    })
-                                    rel.history = new_history
-                                    
-                                    # 更新关系类型 (简单逻辑)
-                                    if rel.intimacy > 0.6: rel.relation_type = "Ally"
-                                    elif rel.intimacy > 0.2: rel.relation_type = "Friendly"
-                                    elif rel.intimacy < -0.6: rel.relation_type = "Enemy"
-                                    elif rel.intimacy < -0.2: rel.relation_type = "Hostile"
+            # 更新角色状态和 DB
+            for evo in evolution_result.evolutions:
+                char = char_map.get(evo.character_name)
+                if not char:
+                    continue
+
+                print(f"  - Evolving {char.name}: {evo.evolution_summary}")
+                
+                # 更新心情
+                if evo.mood_change:
+                    char.current_mood = evo.mood_change
+                    if evo.character_name in state.characters:
+                        state.characters[evo.character_name].current_mood = evo.mood_change
+
+                # 更新技能
+                if evo.skill_update:
+                    current_skills = set(char.skills or [])
+                    current_skills.update(evo.skill_update)
+                    char.skills = list(current_skills)
+                    if evo.character_name in state.characters:
+                        state.characters[evo.character_name].skills = char.skills
+
+                # 更新成长日志
+                timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                log_entry = f"[{timestamp}] Ch.{state.current_plot_index + 1}: {evo.evolution_summary}"
+                char.evolution_log = (char.evolution_log or []) + [log_entry]
+                if evo.character_name in state.characters:
+                    state.characters[evo.character_name].evolution_log.append(log_entry)
+
+                # 处理关系变更 (如果 CharacterEvolution 包含 structural data)
+                if hasattr(evo, 'relationship_change') and evo.relationship_change:
+                    for target_name, description in evo.relationship_change.items():
+                        target_char = char_map.get(target_name)
+                        if target_char:
+                            # 查找或创建关系
+                            rel = db.query(CharacterRelationship).filter(
+                                ((CharacterRelationship.char_a_id == char.id) & (CharacterRelationship.char_b_id == target_char.id)) |
+                                ((CharacterRelationship.char_a_id == target_char.id) & (CharacterRelationship.char_b_id == char.id))
+                            ).first()
+                            
+                            if not rel:
+                                rel = CharacterRelationship(
+                                    char_a_id=char.id,
+                                    char_b_id=target_char.id,
+                                    relation_type="Neutral",
+                                    intimacy=0.0,
+                                    history=[]
+                                )
+                                db.add(rel)
+                            
+                            # 更新历史记录
+                            history = list(rel.history or [])
+                            history.append({"chapter": state.current_plot_index + 1, "desc": description})
+                            rel.history = history
+                            db.commit() # 确保关系保存
+
+            db.commit()
+
+            # 2. 将最终章节内容写入数据库
+            current_chapter_num = state.current_plot_index + 1
             
-            # 2. 保存章节 (Upsert)
-            chapter_num = state.current_plot_index + 1
-            existing_chapter = db.query(DBChapter).filter_by(
-                novel_id=1, 
-                chapter_number=chapter_num,
-                branch_id=state.current_branch
+            # 创建或更新本章
+            chapter_entry = db.query(DBChapter).filter_by(
+                novel_id=state.current_novel_id,
+                branch_id=state.current_branch,
+                chapter_number=current_chapter_num
             ).first()
-            
-            if existing_chapter:
-                existing_chapter.title = f"第 {chapter_num} 章"
-                existing_chapter.content = state.current_draft
-                existing_chapter.summary = evolution_data.get("summary", "")
-                existing_chapter.logic_checked = True
-                # 更新 last_chapter_id
-                state.last_chapter_id = existing_chapter.id
-            else:
-                new_chapter = DBChapter(
-                    novel_id=1,
-                    chapter_number=chapter_num,
+
+            if not chapter_entry:
+                chapter_entry = DBChapter(
+                    novel_id=state.current_novel_id,
                     branch_id=state.current_branch,
-                    previous_chapter_id=state.last_chapter_id, # 链接到上一章
-                    title=f"第 {chapter_num} 章",
-                    content=state.current_draft,
-                    summary=evolution_data.get("summary", ""),
-                    created_at=datetime.utcnow(),
-                    logic_checked=True
+                    chapter_number=current_chapter_num,
+                    previous_chapter_id=state.last_chapter_id
                 )
-                db.add(new_chapter)
-                db.flush() # 获取 ID
-                state.last_chapter_id = new_chapter.id
+                db.add(chapter_entry)
+
+            chapter_entry.title = f"第 {current_chapter_num} 章"
+            if state.current_plot_index < len(state.plot_progress):
+                chapter_entry.title = state.plot_progress[state.current_plot_index].title
+                
+            chapter_entry.content = state.current_draft
+            # 生成摘要 (简单处理)
+            from .utils import generate_chapter_summary
+            chapter_entry.summary = generate_chapter_summary(state.current_draft)
+            chapter_entry.logic_checked = True
             
             db.commit()
+            db.refresh(chapter_entry)
             
-            # 3. 结束性能会话
-            monitor.end_session(state.current_plot_index, success=True, retry_count=state.retry_count)
-            monitor.print_summary()
+            # 更新 memory_context
+            state.memory_context.recent_summaries.append(chapter_entry.summary)
+            if len(state.memory_context.recent_summaries) > 5:
+                state.memory_context.recent_summaries.pop(0)
 
+            print(f"✅ Chapter {current_chapter_num} finalized and saved to DB (ID: {chapter_entry.id}).")
+            
+            # 3. 结束性能监控会话
+            monitor.end_session(state.current_plot_index, success=True, retry_count=state.retry_count)
+            
             return {
                 "current_plot_index": state.current_plot_index + 1,
-                "last_chapter_id": state.last_chapter_id, # 更新状态中的 last_chapter_id
-                "next_action": "finalize",
-                "retry_count": 0 # 重置章节重试计数
+                "last_chapter_id": chapter_entry.id,
+                "retry_count": 0
             }
+
         except Exception as e:
-            print(f"Save & Evolve Error: {e}")
+            print(f"❌ Error during evolution/finalizing: {e}")
             db.rollback()
-            return {"next_action": "finalize"}
+            monitor.end_session(state.current_plot_index, success=False)
+            return {}
         finally:
             db.close()
 

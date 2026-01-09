@@ -15,7 +15,7 @@ class WorldItemSchema(BaseModel):
     powers: Dict[str, Any]
     location: Optional[str] = None
 
-class character_state(BaseModel):
+class CharacterState(BaseModel):
     name: str
     personality_traits: Dict[str, Any] # MBTI, BigFive
     skills: List[str] = Field(default_factory=list, description="角色掌握的技能/功法")
@@ -57,7 +57,7 @@ class NGEState(BaseModel):
     遵循 Antigravity Rules 治理准则
     """
     novel_bible: NovelBible
-    characters: Dict[str, character_state]
+    characters: Dict[str, CharacterState]
     world_items: List[WorldItemSchema] = Field(default_factory=list, description="世界中的关键物品（含在野和已领用的）")
     plot_progress: List[PlotPoint]
     current_plot_index: int = 0

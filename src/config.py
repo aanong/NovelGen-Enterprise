@@ -47,7 +47,7 @@ class ModelConfig:
     """模型配置"""
     
     # Gemini 配置 (Writer Agent)
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "models/gemini-3-pro-preview")
     GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.8"))
     GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
     

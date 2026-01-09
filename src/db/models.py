@@ -130,7 +130,7 @@ class Chapter(Base):
     novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
     branch_id = Column(String(100), default="main", index=True) # 分支 ID
     chapter_number = Column(Integer, nullable=False, index=True)
-    previous_chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True) # 链表结构，用于回溯上下文
+    previous_chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True) # 链表结构
     title = Column(String(512))
     content = Column(Text)
     scene_tags = Column(JSON)        # 场景标签：战斗/对话/环境描写
@@ -142,7 +142,8 @@ class Chapter(Base):
 
     # 添加关系
     audits = relationship("LogicAudit", back_populates="chapter", cascade="all, delete-orphan")
-    parent = relationship("Chapter", remote_side=[id], backref="children") # 自引用关系
+    # 自引用关系，用于章节链表
+    parent = relationship("Chapter", remote_side=[id], backref="children")
     
     # 修改复合唯一索引，包含 branch_id
     __table_args__ = (
