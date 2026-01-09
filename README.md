@@ -28,6 +28,7 @@
 - **RESTful API**: 基于 FastAPI 构建的标准接口，支持 Swagger 文档。
 - **可视化 Dashboard**: 提供基于 Vue.js 的管理界面，支持小说管理、大纲编辑、章节预览和生成控制。
 - **Docker 化部署**: 提供完整的 Docker Compose 配置，一键拉起所有服务。
+- **经典资料库**: 内置修真、赛博朋克、克苏鲁等经典网文设定库，支持 RAG 检索，辅助设定审查与大纲生成。
 
 ---
 
@@ -175,6 +176,20 @@ NGE 提供了强大的 CLI 工具，用于快速测试和批处理。
 *   **实时流式订阅**:
     `GET /generation/stream/{task_id}`
     建立 SSE 连接，实时接收 `token` (生成内容) 和 `status` (当前步骤) 事件。
+
+### 3. 资料库管理
+
+*   **导入经典资料**:
+    ```bash
+    python -m src.scripts.seed_references
+    ```
+    这将自动导入内置的经典设定（如修真境界、赛博朋克元素等）到向量数据库。
+
+*   **审查设定**:
+    ```bash
+    python -m src.scripts.review_setup ./sample_inputs/novel_setup.txt
+    ```
+    系统会自动检索相关资料，提供更专业的修改建议。
 
 ---
 
