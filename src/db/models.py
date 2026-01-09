@@ -75,6 +75,7 @@ class PlotOutline(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     novel_id = Column(Integer, index=True)
+    branch_id = Column(String(100), default="main", index=True) # 分支 ID
     chapter_number = Column(Integer, index=True)
     scene_description = Column(Text) # 核心场面描写
     key_conflict = Column(Text)      # 核心冲突点
@@ -82,9 +83,9 @@ class PlotOutline(Base):
     recalls = Column(JSON)           # 需要回收的伏笔
     status = Column(String(50), default="pending") # pending, completed, skipped
     
-    # 添加复合唯一索引
+    # 修改复合唯一索引，包含 branch_id
     __table_args__ = (
-        Index('idx_novel_chapter', 'novel_id', 'chapter_number', unique=True),
+        Index('idx_novel_branch_chapter', 'novel_id', 'branch_id', 'chapter_number', unique=True),
     )
 
 class Chapter(Base):
@@ -92,7 +93,9 @@ class Chapter(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     novel_id = Column(Integer, index=True)
+    branch_id = Column(String(100), default="main", index=True) # 分支 ID
     chapter_number = Column(Integer, nullable=False, index=True)
+    previous_chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True) # 链表结构，用于回溯上下文
     title = Column(String(512))
     content = Column(Text)
     scene_tags = Column(JSON)        # 场景标签：战斗/对话/环境描写
@@ -102,10 +105,11 @@ class Chapter(Base):
     
     # 添加关系
     audits = relationship("LogicAudit", back_populates="chapter", cascade="all, delete-orphan")
+    parent = relationship("Chapter", remote_side=[id], backref="children") # 自引用关系
     
-    # 添加复合唯一索引
+    # 修改复合唯一索引，包含 branch_id
     __table_args__ = (
-        Index('idx_novel_chapter_num', 'novel_id', 'chapter_number', unique=True),
+        Index('idx_novel_branch_chapter_num', 'novel_id', 'branch_id', 'chapter_number', unique=True),
     )
 
 class LogicAudit(Base):

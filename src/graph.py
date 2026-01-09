@@ -60,7 +60,7 @@ class NGEGraph:
     async def load_context_node(self, state: NGEState):
         """从数据库加载/刷新当前的 State（如人物状态、世界观、历史摘要）"""
         current_ch = state.current_plot_index + 1
-        print(f"--- LOADING CONTEXT (Chapter {current_ch}) ---")
+        print(f"--- LOADING CONTEXT (Chapter {current_ch}, Branch: {state.current_branch}) ---")
         
         # 启动性能会话
         monitor.start_session(current_ch)
@@ -101,16 +101,36 @@ class NGEGraph:
                 ) for item in db_items
             ]
             
-            # 3. Rule 3.1: 加载历史摘要 (最近 3 章)
-            recent_chapters = db.query(DBChapter).filter(
-                DBChapter.novel_id == 1,
-                DBChapter.chapter_number < current_ch
-            ).order_by(DBChapter.chapter_number.desc()).limit(3).all()
+            # 3. Rule 3.1: 加载历史摘要 (链表回溯)
+            summaries = []
             
-            # 按章节顺序排列 (由远及近)
-            summaries = [ch.summary for ch in reversed(recent_chapters) if ch.summary]
+            # 确定回溯起点
+            start_chapter_id = state.last_chapter_id
+            if not start_chapter_id:
+                # 如果没有指定起点，尝试查找当前分支的最新章节
+                latest_chapter = db.query(DBChapter).filter(
+                    DBChapter.novel_id == 1,
+                    DBChapter.branch_id == state.current_branch,
+                    DBChapter.chapter_number < current_ch
+                ).order_by(DBChapter.chapter_number.desc()).first()
+                if latest_chapter:
+                    start_chapter_id = latest_chapter.id
+            
+            # 开始回溯
+            curr_id = start_chapter_id
+            for _ in range(3): # 回溯 3 章
+                if not curr_id:
+                    break
+                ch = db.query(DBChapter).filter(DBChapter.id == curr_id).first()
+                if ch:
+                    if ch.summary:
+                        summaries.insert(0, ch.summary) # 插入到开头，保持时间顺序
+                    curr_id = ch.previous_chapter_id
+                else:
+                    break
+            
             state.memory_context.recent_summaries = summaries
-            print(f"✅ 已加载 {len(summaries)} 条历史摘要。")
+            print(f"✅ 已加载 {len(summaries)} 条历史摘要 (Branch: {state.current_branch})。")
             
             return {"next_action": "plan"}
         except Exception as e:
@@ -120,20 +140,21 @@ class NGEGraph:
             db.close()
 
     async def plan_node(self, state: NGEState):
-        print("--- PLANNING CHAPTER ---")
+        print(f"--- PLANNING CHAPTER (Branch: {state.current_branch}) ---")
         db = SessionLocal()
         try:
             current_chapter_num = state.current_plot_index + 1
             
-            # 1. 检查 DB 是否已有大纲
+            # 1. 检查 DB 是否已有大纲 (匹配 branch_id)
             outline = db.query(PlotOutline).filter_by(
                 novel_id=1, 
-                chapter_number=current_chapter_num
+                chapter_number=current_chapter_num,
+                branch_id=state.current_branch
             ).first()
             
             if outline:
                 # 如果已有大纲（不管是 pending 还是 completed），直接复用
-                print(f"✅ 发现现有大纲 (Ch.{current_chapter_num}, Status: {outline.status})")
+                print(f"✅ 发现现有大纲 (Ch.{current_chapter_num}, Branch: {state.current_branch}, Status: {outline.status})")
                 
                 # 如果是 pending 且内容为空，则可以调用 Agent 补充，但这里我们假设 import 已有内容
                 if not outline.scene_description or not outline.key_conflict:
@@ -154,6 +175,7 @@ class NGEGraph:
             new_outline = PlotOutline(
                 novel_id=1,
                 chapter_number=current_chapter_num,
+                branch_id=state.current_branch,
                 scene_description=plan_data.get("scene", "Generated Scene"),
                 key_conflict=plan_data.get("conflict", "Generated Conflict"),
                 status="pending"
@@ -340,16 +362,25 @@ class NGEGraph:
             
             # 2. 保存章节 (Upsert)
             chapter_num = state.current_plot_index + 1
-            existing_chapter = db.query(DBChapter).filter_by(novel_id=1, chapter_number=chapter_num).first()
+            existing_chapter = db.query(DBChapter).filter_by(
+                novel_id=1, 
+                chapter_number=chapter_num,
+                branch_id=state.current_branch
+            ).first()
+            
             if existing_chapter:
                 existing_chapter.title = f"第 {chapter_num} 章"
                 existing_chapter.content = state.current_draft
                 existing_chapter.summary = evolution_data.get("summary", "")
                 existing_chapter.logic_checked = True
+                # 更新 last_chapter_id
+                state.last_chapter_id = existing_chapter.id
             else:
                 new_chapter = DBChapter(
                     novel_id=1,
                     chapter_number=chapter_num,
+                    branch_id=state.current_branch,
+                    previous_chapter_id=state.last_chapter_id, # 链接到上一章
                     title=f"第 {chapter_num} 章",
                     content=state.current_draft,
                     summary=evolution_data.get("summary", ""),
@@ -357,6 +388,9 @@ class NGEGraph:
                     logic_checked=True
                 )
                 db.add(new_chapter)
+                db.flush() # 获取 ID
+                state.last_chapter_id = new_chapter.id
+            
             db.commit()
             
             # 3. 结束性能会话
@@ -365,6 +399,7 @@ class NGEGraph:
 
             return {
                 "current_plot_index": state.current_plot_index + 1,
+                "last_chapter_id": state.last_chapter_id, # 更新状态中的 last_chapter_id
                 "next_action": "finalize",
                 "retry_count": 0 # 重置章节重试计数
             }

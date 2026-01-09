@@ -61,6 +61,9 @@ class NGEState(BaseModel):
     world_items: List[WorldItemSchema] = Field(default_factory=list, description="世界中的关键物品（含在野和已领用的）")
     plot_progress: List[PlotPoint]
     current_plot_index: int = 0
+    current_branch: str = Field(default="main", description="当前剧情分支 ID")
+    last_chapter_id: Optional[int] = Field(None, description="上一章的数据库 ID，用于构建链表")
+    branch_options: Optional[List[Dict[str, Any]]] = Field(None, description="当前节点的可选分支走向")
     memory_context: MemoryContext
     
     # 反重力规则上下文 (Rule 1-6)
