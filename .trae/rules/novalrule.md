@@ -6,7 +6,10 @@
 - **技术栈**:
   - **LLM**: Gemini-1.5-Pro/Gemini-3-Pro (主生成/长上下文), Deepseek-V3/R1 (逻辑推理/大纲构建/审查).
   - **Orchestration**: LangGraph (必须使用StateGraph), LangChain.
+  - **Backend**: FastAPI (REST API), SQLAlchemy (ORM).
+  - **Frontend**: Vue.js 3 (Dashboard), TailwindCSS.
   - **Database**: PostgreSQL (pgvector 插件用于RAG，JSONB 用于存储复杂状态).
+  - **Infrastructure**: Docker & Docker Compose.
   - **Language**: Python 3.10+.
 
 ## 2. 架构设计原则 (Architecture Rules)
@@ -22,12 +25,14 @@
   - `character_state`: 动态的人物属性表（随章节更新，记录成长）。
   - `plot_progress`: 当前剧情进度指针（已完成/待完成）。
   - `memory_context`: 最近 N 章的摘要 + 全局关键伏笔。
+  - `current_branch`: 当前剧情分支 ID (支持多线叙事)。
 
 ### 2.3 数据库设计 (PostgreSQL)
 - **Strict Schema**:
   - `style_ref`: 存储原著片段的 Embedding (用于RAG检索文风)。
   - `characters`: 存储人物档案，包含 `personality_traits`, `relationships`, `evolution_log` (JSONB)。
-  - `chapters`: 存储生成内容，包含 `scene_tags` (场景标签，用于动态调整文风)。
+  - `chapters`: 存储生成内容，包含 `branch_id` (分支标识) 和 `previous_chapter_id` (链表结构，用于回溯上下文)。
+  - `plot_outlines`: 存储分章大纲，支持多分支 (`branch_id`)。
 
 ## 3. 核心功能实现规范 (Implementation Guidelines)
 
@@ -58,7 +63,21 @@
   1. 用户提供核心梗概 (Core Synopsis) 和预计章节数。
   2. Architect Agent 将梗概拆解为具体的 `PlotOutline` 序列，包含每章的 `scene_description` 和 `key_conflict`。
   3. 存入 `plot_outlines` 表，作为后续写作的导航地图。
-  4. 写作过程中，`Plan` 节点优先读取数据库中的预生成大纲，仅在必要时进行微调。
+  4. 支持 **Refine Mode**: 允许用户指定起始章节，对后续大纲进行增量调整。
+
+### 3.5 多线剧情分支 (Multi-Branch Storyline)
+- **Rule**: 系统必须支持平行宇宙（IF 线）的生成。
+- **Action**:
+  1. 数据库 `chapters` 和 `plot_outlines` 表通过 `branch_id` 区分不同分支。
+  2. 上下文加载时，通过 `previous_chapter_id` 链表回溯，确保只加载当前分支的历史。
+  3. 提供 API 接口切换当前分支，实现不同走向的续写。
+
+### 3.6 可视化交互 (Visual Interaction)
+- **Rule**: 提供直观的界面用于监控和干预。
+- **Action**:
+  1. **Dashboard**: 展示章节列表、角色状态卡片、大纲进度条。
+  2. **Control**: 提供“生成下一章”、“暂停”、“重试”按钮。
+  3. **Reader**: 内置 Markdown 渲染器，实时预览生成效果。
 
 ## 4. 代码规范 (Coding Standards)
 
@@ -66,6 +85,7 @@
 - **Modular Agents**: 每个 Agent (Node) 必须封装为独立的 Class 或 Callable，便于在 Graph 中编排。
 - **Error Handling**: LLM 调用必须包含重试机制 (Exponential Backoff) 和 fallback 策略。
 - **Environment**: 使用 `.env` 管理 API Keys (`GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `POSTGRES_URL`).
+- **Containerization**: 必须维护 `Dockerfile` 和 `docker-compose.yml`，确保环境一致性。
 
 ## 5. 提示词工程策略 (Prompt Engineering Strategy)
 
@@ -78,8 +98,10 @@
 ## 6. 开发路线图 (Step-by-Step Execution for AI)
 
 如果你（AI）要开始写代码，请遵循以下顺序：
-1. **Setup**: 初始化 PostgreSQL 表结构 (`alembic`) 和 LangChain 基础配置。
-2. **Module 1 (Learner)**: 实现文本分析 Agent，提取文风特征存入 PGVector。
-3. **Module 2 (Architect)**: 实现大纲扩充与拆解 Agent (Deepseek)。
-4. **Module 3 (Writer)**: 实现基于 LangGraph 的写作循环 (Plan -> Write -> Review -> Revise)。
-5. **Module 4 (Memory)**: 实现人物状态更新与上下文检索机制。
+1. **Setup**: 初始化 PostgreSQL 表结构 (`alembic`) 和 LangChain 基础配置。 (✅ Completed)
+2. **Module 1 (Learner)**: 实现文本分析 Agent，提取文风特征存入 PGVector。 (✅ Completed)
+3. **Module 2 (Architect)**: 实现大纲扩充与拆解 Agent (Deepseek)。 (✅ Completed)
+4. **Module 3 (Writer)**: 实现基于 LangGraph 的写作循环 (Plan -> Write -> Review -> Revise)。 (✅ Completed)
+5. **Module 4 (Memory)**: 实现人物状态更新与上下文检索机制。 (✅ Completed)
+6. **Module 5 (API & UI)**: 实现 FastAPI 后端与 Vue 前端，提供可视化操作界面。 (✅ Completed)
+7. **Module 6 (Optimization)**: 引入 Docker 部署，优化大纲生成策略 (Refine Mode)。 (✅ Completed)
