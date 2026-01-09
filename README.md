@@ -123,18 +123,33 @@ python -m src.scripts.import_novel ./reviewed_setups/enhanced_setup.txt
 python -m src.scripts.import_novel ./sample_inputs/novel_setup.txt
 ```
 
-### 步骤 3: 开启创作
-系统会自动识别当前进度并生成下一章：
+### 步骤 3: 生成/调整大纲
+在开始写作前，先生成全书大纲：
 ```bash
-python -m src.main
+python -m src.scripts.generate_outline ./sample_inputs/novel_setup.txt --chapters 20
 ```
 
-每次运行都会：
-1. 从数据库加载最新进度
-2. 调用 `Architect` 规划本章剧情
-3. 使用 `Writer` 生成正文
-4. 通过 `Reviewer` 进行逻辑审查
-5. 保存到数据库并更新人物状态
+### 步骤 4: 开启创作 (CLI 方式)
+系统会自动识别当前进度并生成下一章：
+```bash
+python -m src.main --run
+```
+
+### 步骤 5: 开启创作 (GUI 方式 - 推荐)
+我们提供了一个基于 Web 的控制台，用于监控进度、阅读章节和触发生成。
+
+启动服务：
+```bash
+python src/run_server.py
+```
+
+然后打开浏览器访问: [http://localhost:8000](http://localhost:8000)
+
+功能包括：
+- 📊 **实时看板**: 查看章节数、角色数和大纲进度。
+- 📖 **在线阅读**: 浏览已生成的章节内容。
+- 🚀 **一键生成**: 点击按钮触发下一章生成任务。
+- 👥 **角色监控**: 查看角色当前的心情和状态。
 
 ---
 
@@ -199,7 +214,7 @@ NovelGen-Enterprise/
 - [x] **角色状态演化**: 实时更新技能、物品消耗及人际关系
 - [x] **多线剧情分支**: 支持生成多个结局路径
 - [x] **智能大纲工具**: 支持大纲自动生成与交互式调整
-- [ ] **可视化界面**: 基于 Next.js 的创作 Dashboard
+- [x] **可视化界面**: 基于 FastAPI + Vue 的创作 Dashboard
 
 ---
 

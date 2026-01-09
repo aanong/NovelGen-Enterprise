@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NovelGen Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">NovelGen Enterprise</h1>
+                <p class="text-gray-600">AI 小说生成控制台</p>
+            </div>
+            <div class="flex gap-4">
+                <button @click="fetchData" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+                    刷新数据
+                </button>
+                <button @click="triggerGeneration" :disabled="isGenerating" 
+                    class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                    {{ isGenerating ? '生成中...' : '生成下一章' }}
+                </button>
+            </div>
+        </header>
+
+        <!-- 状态概览 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">已生成章节</h3>
+                <p class="text-4xl font-bold text-blue-600">{{ chapters.length }}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">登场角色</h3>
+                <p class="text-4xl font-bold text-purple-600">{{ characters.length }}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">大纲进度</h3>
+                <p class="text-4xl font-bold text-green-600">{{ outlines.length }}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 章节列表 -->
+            <div class="lg:col-span-2">
+                <h2 class="text-xl font-bold mb-4">章节列表</h2>
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <div v-for="chapter in chapters" :key="chapter.id" class="border-b last:border-0 p-4 hover:bg-gray-50">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-lg">第 {{ chapter.chapter_number }} 章: {{ chapter.title || '无标题' }}</h3>
+                            <span class="text-sm text-gray-500">{{ formatDate(chapter.created_at) }}</span>
+                        </div>
+                        <p class="text-gray-600 line-clamp-3">{{ chapter.summary || '暂无摘要' }}</p>
+                        <button @click="viewChapter(chapter)" class="mt-2 text-blue-500 hover:text-blue-700 text-sm">
+                            阅读全文
+                        </button>
+                    </div>
+                    <div v-if="chapters.length === 0" class="p-8 text-center text-gray-500">
+                        暂无章节，请点击右上角生成。
+                    </div>
+                </div>
+            </div>
+
+            <!-- 侧边栏 -->
+            <div class="space-y-8">
+                <!-- 角色列表 -->
+                <div>
+                    <h2 class="text-xl font-bold mb-4">活跃角色</h2>
+                    <div class="bg-white rounded-lg shadow p-4">
+                        <div v-for="char in characters" :key="char.id" class="mb-4 last:mb-0 border-b last:border-0 pb-2">
+                            <div class="flex justify-between">
+                                <span class="font-bold">{{ char.name }}</span>
+                                <span class="text-xs bg-gray-200 px-2 py-1 rounded">{{ char.role || '配角' }}</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1">心情: {{ char.current_mood || '未知' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 大纲预览 -->
+                <div>
+                    <h2 class="text-xl font-bold mb-4">后续大纲</h2>
+                    <div class="bg-white rounded-lg shadow p-4">
+                        <div v-for="outline in pendingOutlines" :key="outline.id" class="mb-3 text-sm">
+                            <span class="font-bold text-gray-700">第 {{ outline.chapter_number }} 章:</span>
+                            <span class="text-gray-600 ml-2">{{ outline.scene_description?.substring(0, 50) }}...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 章节阅读模态框 -->
+        <div v-if="selectedChapter" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                <div class="p-4 border-b flex justify-between items-center">
+                    <h2 class="text-xl font-bold">第 {{ selectedChapter.chapter_number }} 章: {{ selectedChapter.title }}</h2>
+                    <button @click="selectedChapter = null" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                </div>
+                <div class="p-6 overflow-y-auto prose max-w-none">
+                    <div class="whitespace-pre-wrap">{{ selectedChapter.content }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, computed } = Vue;
+
+        createApp({
+            setup() {
+                const chapters = ref([]);
+                const characters = ref([]);
+                const outlines = ref([]);
+                const isGenerating = ref(false);
+                const selectedChapter = ref(null);
+
+                const pendingOutlines = computed(() => {
+                    // 简单的过滤，实际应该根据 status
+                    const lastChapterNum = chapters.value.length > 0 
+                        ? Math.max(...chapters.value.map(c => c.chapter_number)) 
+                        : 0;
+                    return outlines.value.filter(o => o.chapter_number > lastChapterNum).slice(0, 5);
+                });
+
+                const fetchData = async () => {
+                    try {
+                        const [chaptersRes, charsRes, outlinesRes, statusRes] = await Promise.all([
+                            axios.get('/api/chapters/'),
+                            axios.get('/api/characters/'),
+                            axios.get('/api/outlines/'),
+                            axios.get('/api/generate/status')
+                        ]);
+                        
+                        chapters.value = chaptersRes.data;
+                        characters.value = charsRes.data;
+                        outlines.value = outlinesRes.data;
+                        isGenerating.value = statusRes.data.is_generating;
+                    } catch (error) {
+                        console.error('Error fetching data:', error);
+                    }
+                };
+
+                const triggerGeneration = async () => {
+                    try {
+                        isGenerating.value = true;
+                        await axios.post('/api/generate/', { branch_id: 'main' });
+                        // 轮询状态
+                        pollStatus();
+                    } catch (error) {
+                        console.error('Error triggering generation:', error);
+                        isGenerating.value = false;
+                        alert('生成启动失败: ' + (error.response?.data?.detail || error.message));
+                    }
+                };
+
+                const pollStatus = () => {
+                    const interval = setInterval(async () => {
+                        try {
+                            const res = await axios.get('/api/generate/status');
+                            isGenerating.value = res.data.is_generating;
+                            if (!isGenerating.value) {
+                                clearInterval(interval);
+                                fetchData(); // 生成完成后刷新数据
+                                alert('章节生成完成！');
+                            }
+                        } catch (e) {
+                            clearInterval(interval);
+                        }
+                    }, 2000);
+                };
+
+                const viewChapter = async (chapter) => {
+                    // 获取完整内容
+                    try {
+                        const res = await axios.get(`/api/chapters/${chapter.id}`);
+                        selectedChapter.value = res.data;
+                    } catch (error) {
+                        alert('无法加载章节内容');
+                    }
+                };
+
+                const formatDate = (dateStr) => {
+                    if (!dateStr) return '';
+                    return new Date(dateStr).toLocaleString();
+                };
+
+                onMounted(() => {
+                    fetchData();
+                });
+
+                return {
+                    chapters,
+                    characters,
+                    outlines,
+                    pendingOutlines,
+                    isGenerating,
+                    selectedChapter,
+                    fetchData,
+                    triggerGeneration,
+                    viewChapter,
+                    formatDate
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
