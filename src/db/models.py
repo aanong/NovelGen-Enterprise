@@ -77,9 +77,34 @@ class Character(Base):
     inventory = relationship("WorldItem", back_populates="owner")
     relationships_as_a = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.char_a_id", back_populates="character_a", cascade="all, delete-orphan")
     relationships_as_b = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.char_b_id", back_populates="character_b", cascade="all, delete-orphan")
+    branch_statuses = relationship("CharacterBranchStatus", back_populates="character", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index('idx_novel_char_name', 'novel_id', 'name', unique=True), # 同一本小说内名字唯一
+    )
+
+class CharacterBranchStatus(Base):
+    """人物在特定分支、特定章节的状态快照"""
+    __tablename__ = "character_branch_statuses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    character_id = Column(Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_id = Column(String(100), nullable=False, index=True)
+    chapter_number = Column(Integer, nullable=False, index=True)
+    
+    # 状态快照
+    current_mood = Column(String(100))
+    status = Column(JSON) # 生理/心理状态
+    skills = Column(JSON) # 当时的技能列表
+    assets = Column(JSON) # 当时的资产
+    is_active = Column(Boolean, default=True) # 是否存活/活跃
+    
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    character = relationship("Character", back_populates="branch_statuses")
+
+    __table_args__ = (
+        Index('idx_char_branch_chapter', 'character_id', 'branch_id', 'chapter_number', unique=True),
     )
 
 class CharacterRelationship(Base):

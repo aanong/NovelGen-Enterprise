@@ -7,7 +7,7 @@ from .agents.reviewer import ReviewerAgent
 from .agents.style_analyzer import StyleAnalyzer
 from .agents.evolver import CharacterEvolver
 from .db.base import SessionLocal
-from .db.models import Novel, NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter, WorldItem
+from .db.models import Novel, NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter, WorldItem, CharacterBranchStatus
 from .db.vector_store import VectorStore
 from .monitoring import monitor
 from .utils import strip_think_tags
@@ -70,18 +70,41 @@ class NGEGraph:
         
         db = SessionLocal()
         try:
-            # 1. 同步角色状态
-            db_chars = db.query(Character).all()
+            # 1. 同步角色状态 (支持分支快照)
+            db_chars = db.query(Character).filter(Character.novel_id == state.current_novel_id).all()
             for c in db_chars:
                 if c.name in state.characters:
-                    char = state.characters[c.name]
-                    char.current_mood = c.current_mood
-                    char.personality_traits = c.personality_traits or {}
-                    char.skills = c.skills or []
-                    char.assets = c.assets or {}
+                    char_state = state.characters[c.name]
+                    
+                    # 默认使用全局最新状态
+                    target_mood = c.current_mood
+                    target_skills = c.skills or []
+                    target_assets = c.assets or {}
+                    target_status = c.status or {}
+                    
+                    # 尝试查找分支快照
+                    # 查找条件：当前分支，章节号 < 当前章节，按章节号倒序取第一个
+                    snapshot = db.query(CharacterBranchStatus).filter(
+                        CharacterBranchStatus.character_id == c.id,
+                        CharacterBranchStatus.branch_id == state.current_branch,
+                        CharacterBranchStatus.chapter_number < current_ch
+                    ).order_by(CharacterBranchStatus.chapter_number.desc()).first()
+                    
+                    if snapshot:
+                        print(f"  - Loaded snapshot for {c.name} from Branch {state.current_branch} Ch.{snapshot.chapter_number}")
+                        target_mood = snapshot.current_mood
+                        target_skills = snapshot.skills or []
+                        target_assets = snapshot.assets or {}
+                        target_status = snapshot.status or {}
+                    
+                    # 更新 State
+                    char_state.current_mood = target_mood
+                    char_state.skills = target_skills
+                    char_state.assets = target_assets
+                    char_state.status = target_status
                     
                     # 同步背包
-                    char.inventory = [
+                    char_state.inventory = [
                         WorldItemSchema(
                             name=item.name,
                             description=item.description,
@@ -92,7 +115,7 @@ class NGEGraph:
                     ]
             
             # 2. 同步全球物品
-            db_items = db.query(WorldItem).all()
+            db_items = db.query(WorldItem).filter(WorldItem.novel_id == state.current_novel_id).all()
             state.world_items = [
                 WorldItemSchema(
                     name=item.name,
@@ -331,7 +354,22 @@ class NGEGraph:
                             rel.history = history
                             db.commit() # 确保关系保存
 
+                # --- 关键新增：保存分支快照 ---
+                snapshot = CharacterBranchStatus(
+                    character_id=char.id,
+                    branch_id=state.current_branch,
+                    chapter_number=state.current_plot_index + 1,
+                    current_mood=char.current_mood,
+                    status=char.status,
+                    skills=char.skills,
+                    assets=char.assets,
+                    is_active=True # 默认活跃，除非 evolver 明确指出死亡
+                )
+                db.add(snapshot)
+                # ---------------------------
+
             db.commit()
+            print("✅ Character evolution saved to DB (Global & Branch Snapshot).")
 
             # 2. 将最终章节内容写入数据库
             current_chapter_num = state.current_plot_index + 1
