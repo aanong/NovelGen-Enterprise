@@ -9,12 +9,14 @@ router = APIRouter()
 
 @router.get("/", response_model=List[OutlineResponse])
 def read_outlines(
+    novel_id: int,
     skip: int = 0, 
     limit: int = 100, 
     branch_id: str = "main",
     db: Session = Depends(get_db)
 ):
     outlines = db.query(PlotOutline).filter(
+        PlotOutline.novel_id == novel_id,
         PlotOutline.branch_id == branch_id
     ).order_by(PlotOutline.chapter_number).offset(skip).limit(limit).all()
     return outlines

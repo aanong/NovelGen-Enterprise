@@ -15,11 +15,16 @@
                 <h1 class="text-3xl font-bold text-gray-800">NovelGen Enterprise</h1>
                 <p class="text-gray-600">AI 小说生成控制台</p>
             </div>
-            <div class="flex gap-4">
+            <div class="flex gap-4 items-center">
+                <select v-model="selectedNovelId" @change="fetchData" class="border rounded px-3 py-2 bg-white">
+                    <option v-for="novel in novels" :key="novel.id" :value="novel.id">
+                        {{ novel.title }}
+                    </option>
+                </select>
                 <button @click="fetchData" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
                     刷新数据
                 </button>
-                <button @click="triggerGeneration" :disabled="isGenerating" 
+                <button @click="triggerGeneration" :disabled="isGenerating || !selectedNovelId" 
                     class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">
                     {{ isGenerating ? '生成中...' : '生成下一章' }}
                 </button>
@@ -111,6 +116,8 @@
 
         createApp({
             setup() {
+                const novels = ref([]);
+                const selectedNovelId = ref(null);
                 const chapters = ref([]);
                 const characters = ref([]);
                 const outlines = ref([]);
@@ -125,12 +132,27 @@
                     return outlines.value.filter(o => o.chapter_number > lastChapterNum).slice(0, 5);
                 });
 
+                const fetchNovels = async () => {
+                    try {
+                        const res = await axios.get('/api/novels/');
+                        novels.value = res.data;
+                        if (novels.value.length > 0 && !selectedNovelId.value) {
+                            selectedNovelId.value = novels.value[0].id;
+                            fetchData();
+                        }
+                    } catch (error) {
+                        console.error('Error fetching novels:', error);
+                    }
+                };
+
                 const fetchData = async () => {
+                    if (!selectedNovelId.value) return;
+                    
                     try {
                         const [chaptersRes, charsRes, outlinesRes, statusRes] = await Promise.all([
-                            axios.get('/api/chapters/'),
-                            axios.get('/api/characters/'),
-                            axios.get('/api/outlines/'),
+                            axios.get(`/api/chapters/?novel_id=${selectedNovelId.value}`),
+                            axios.get(`/api/characters/?novel_id=${selectedNovelId.value}`),
+                            axios.get(`/api/outlines/?novel_id=${selectedNovelId.value}`),
                             axios.get('/api/generate/status')
                         ]);
                         
@@ -144,9 +166,14 @@
                 };
 
                 const triggerGeneration = async () => {
+                    if (!selectedNovelId.value) return;
+                    
                     try {
                         isGenerating.value = true;
-                        await axios.post('/api/generate/', { branch_id: 'main' });
+                        await axios.post('/api/generate/', { 
+                            novel_id: selectedNovelId.value,
+                            branch_id: 'main' 
+                        });
                         // 轮询状态
                         pollStatus();
                     } catch (error) {
@@ -188,10 +215,12 @@
                 };
 
                 onMounted(() => {
-                    fetchData();
+                    fetchNovels();
                 });
 
                 return {
+                    novels,
+                    selectedNovelId,
                     chapters,
                     characters,
                     outlines,

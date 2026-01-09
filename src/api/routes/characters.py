@@ -8,8 +8,15 @@ from src.api.schemas import CharacterResponse
 router = APIRouter()
 
 @router.get("/", response_model=List[CharacterResponse])
-def read_characters(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    characters = db.query(Character).offset(skip).limit(limit).all()
+def read_characters(
+    novel_id: int,
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db)
+):
+    characters = db.query(Character).filter(
+        Character.novel_id == novel_id
+    ).offset(skip).limit(limit).all()
     return characters
 
 @router.get("/{character_id}", response_model=CharacterResponse)

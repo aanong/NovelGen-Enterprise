@@ -4,6 +4,25 @@ from pgvector.sqlalchemy import Vector
 from .base import Base
 import datetime
 
+class Novel(Base):
+    """小说元数据管理"""
+    __tablename__ = "novels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False, index=True)
+    description = Column(Text)
+    author = Column(String(100))
+    status = Column(String(50), default="ongoing") # ongoing, completed, hiatus
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # 关系
+    chapters = relationship("Chapter", back_populates="novel", cascade="all, delete-orphan")
+    characters = relationship("Character", back_populates="novel", cascade="all, delete-orphan")
+    outlines = relationship("PlotOutline", back_populates="novel", cascade="all, delete-orphan")
+    bible_entries = relationship("NovelBible", back_populates="novel", cascade="all, delete-orphan")
+    world_items = relationship("WorldItem", back_populates="novel", cascade="all, delete-orphan")
+
 class StyleRef(Base):
     __tablename__ = "style_ref"
 
@@ -12,29 +31,37 @@ class StyleRef(Base):
     embedding = Column(Vector(768)) # 使用 pgvector 存储 768 维向量
     source_author = Column(String(255))
     style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征
+    
+    # 可选：关联特定小说，为空则为全局通用
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=True, index=True)
 
 class NovelBible(Base):
     """世界观/设定集 (Novel Bible)"""
     __tablename__ = "novel_bible"
 
     id = Column(Integer, primary_key=True, index=True)
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
     category = Column(String(100), index=True) 
-    key = Column(String(255), unique=True, index=True)
+    key = Column(String(255), index=True) # 去掉 unique=True，因为不同小说可能有相同的 key
     content = Column(Text, nullable=False)
     embedding = Column(Vector(768)) # 使用 pgvector 存储 768 维向量
     importance = Column(Integer, default=5)
     tags = Column(JSON)
     
+    novel = relationship("Novel", back_populates="bible_entries")
+
     # 添加复合索引以优化按 category + importance 查询
     __table_args__ = (
-        Index('idx_category_importance', 'category', 'importance'),
+        Index('idx_novel_category_importance', 'novel_id', 'category', 'importance'),
+        Index('idx_novel_key', 'novel_id', 'key', unique=True), # 在同一本小说内 key 必须唯一
     )
 
 class Character(Base):
     __tablename__ = "characters"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), unique=True, index=True, nullable=False)
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), index=True, nullable=False) # 去掉全局 unique
     role = Column(String(100)) # 主角/配角/反派
     personality_traits = Column(JSON) # MBTI, BigFive, 核心动机, 缺陷
     skills = Column(JSON)             # 功法、神技、被动技能
@@ -44,10 +71,16 @@ class Character(Base):
     status = Column(JSON)             # 当前生理/心理状态（受伤、狂喜等）
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
+    novel = relationship("Novel", back_populates="characters")
+
     # 添加关系
     inventory = relationship("WorldItem", back_populates="owner")
     relationships_as_a = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.char_a_id", back_populates="character_a", cascade="all, delete-orphan")
     relationships_as_b = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.char_b_id", back_populates="character_b", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_novel_char_name', 'novel_id', 'name', unique=True), # 同一本小说内名字唯一
+    )
 
 class CharacterRelationship(Base):
     """人物关系矩阵"""
@@ -74,7 +107,7 @@ class PlotOutline(Base):
     __tablename__ = "plot_outlines"
 
     id = Column(Integer, primary_key=True, index=True)
-    novel_id = Column(Integer, index=True)
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
     branch_id = Column(String(100), default="main", index=True) # 分支 ID
     chapter_number = Column(Integer, index=True)
     scene_description = Column(Text) # 核心场面描写
@@ -83,6 +116,8 @@ class PlotOutline(Base):
     recalls = Column(JSON)           # 需要回收的伏笔
     status = Column(String(50), default="pending") # pending, completed, skipped
     
+    novel = relationship("Novel", back_populates="outlines")
+
     # 修改复合唯一索引，包含 branch_id
     __table_args__ = (
         Index('idx_novel_branch_chapter', 'novel_id', 'branch_id', 'chapter_number', unique=True),
@@ -92,7 +127,7 @@ class Chapter(Base):
     __tablename__ = "chapters"
 
     id = Column(Integer, primary_key=True, index=True)
-    novel_id = Column(Integer, index=True)
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
     branch_id = Column(String(100), default="main", index=True) # 分支 ID
     chapter_number = Column(Integer, nullable=False, index=True)
     previous_chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True) # 链表结构，用于回溯上下文
@@ -103,6 +138,8 @@ class Chapter(Base):
     logic_checked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
+    novel = relationship("Novel", back_populates="chapters")
+
     # 添加关系
     audits = relationship("LogicAudit", back_populates="chapter", cascade="all, delete-orphan")
     parent = relationship("Chapter", remote_side=[id], backref="children") # 自引用关系
@@ -126,12 +163,14 @@ class LogicAudit(Base):
     
     # 添加关系
     chapter = relationship("Chapter", back_populates="audits")
+
 class WorldItem(Base):
     """关键物品/法宝管理"""
     __tablename__ = "world_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), unique=True, index=True, nullable=False)
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), index=True, nullable=False) # 去掉全局 unique
     description = Column(Text)
     rarity = Column(String(100)) # 凡、灵、宝、仙、神
     powers = Column(JSON)       # 物品的具体数值或特殊词条
@@ -139,4 +178,9 @@ class WorldItem(Base):
     location = Column(String(255)) # 如果不在人身上，所在位置
     is_unique = Column(Boolean, default=True)
 
+    novel = relationship("Novel", back_populates="world_items")
     owner = relationship("Character", back_populates="inventory")
+
+    __table_args__ = (
+        Index('idx_novel_item_name', 'novel_id', 'name', unique=True), # 同一本小说内物品名唯一
+    )

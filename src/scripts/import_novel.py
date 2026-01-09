@@ -8,17 +8,19 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.agents.learner import LearnerAgent
-from src.db.base import SessionLocal, engine, Base
-from src.db.models import Character, NovelBible, PlotOutline, StyleRef, WorldItem
+from src.db.base import SessionLocal
+from src.db.models import Novel, Character, NovelBible, PlotOutline, StyleRef, WorldItem
 from src.utils import get_embedding
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 import json
 
-async def import_novel(file_path: str, use_llm: bool = True):
-    print(f"📂 读取文档: {file_path}")
+async def import_novel_data(file_path: str, novel_id: int, use_llm: bool = True):
+    """
+    Imports novel data from a file into the database for a specific novel.
+    """
+    print(f"📂 Reading document: {file_path}")
     if not os.path.exists(file_path):
-        print("❌ 文件不存在")
+        print("❌ File not found")
         return
 
     with open(file_path, "r", encoding="utf-8") as f:
@@ -26,245 +28,146 @@ async def import_novel(file_path: str, use_llm: bool = True):
 
     data = None
     if use_llm:
-        print("🧠 正在调用 LearnerAgent 解析文档... (这可能需要一分钟)")
+        print("🧠 Calling LearnerAgent to parse the document... (This might take a minute)")
         agent = LearnerAgent()
         try:
             data = await agent.parse_document(content)
-            print("✅ 解析成功！正在写入数据库...")
+            print("✅ Parsing successful! Writing to the database...")
         except Exception as e:
-            print(f"❌ 解析过程出错: {e}")
+            print(f"❌ Error during LLM parsing: {e}. Will proceed with fallback.")
+    
     if data is None:
-        print("🔧 使用本地回退解析模式")
+        print("🔧 Using local fallback parsing mode. Data will be minimal.")
         lines = [l.strip() for l in content.splitlines() if l.strip()]
-        world = []
-        if lines:
-            world.append({"category": "设定", "key": "初始", "content": lines[0]})
-        chars = []
-        outlines = []
-        style = {"tone": "常规", "rhetoric": [], "keywords": [], "example_sentence": "暂无"}
+        world = [{"category": "Setting", "key": "Initial Scene", "content": lines[0] if lines else "A new world begins."}]
         fallback = {
-            "world_view_items": world,
-            "characters": chars,
-            "outlines": outlines,
-            "style": style
+            "world_view_items": world, 
+            "characters": [], 
+            "outlines": [{"chapter_number": 1, "title": "The Beginning", "summary": "The story starts here."}],
+            "items": [],
+            "style": {"tone": "Neutral", "rhetoric": [], "keywords": [], "example_sentence": "This is a sample sentence."}
         }
         from pydantic import BaseModel
-        class F(BaseModel):
-            world_view_items: list
-            characters: list
-            outlines: list
-            style: dict
-        f = F.model_validate(fallback)
-        class D(BaseModel):
-            world_view_items: list
-            characters: list
-            outlines: list
-            style: dict
-        data = D.model_validate(fallback)
+        class FallbackModel(BaseModel):
+            world_view_items: list; characters: list; outlines: list; items: list; style: dict
+        data = FallbackModel.model_validate(fallback)
 
-    # Create tables if they don't exist
-    print("🛠 正在检查/创建数据库表...")
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-    except Exception as e:
-        print(f"❌ 无法连接数据库: {e}")
-        return
-    try:
-        with engine.connect() as conn:
-            try:
-                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                conn.commit()
-                print("✅ pgvector 扩展已就绪")
-            except Exception as e:
-                print(f"⚠️ 无法创建 pgvector 扩展: {e}")
-    except Exception as e:
-        print(f"⚠️ 数据库连接异常: {e}")
-
-    try:
-        Base.metadata.create_all(bind=engine)
-        print("✅ 数据库表已同步")
-    except Exception as e:
-        print(f"⚠️ 创建/同步数据库表时出错: {e}")
-    
     db: Session = SessionLocal()
     try:
-        # 1. 保存世界观 (Novel Bible)
+        # 1. Save Worldview (Novel Bible)
         for item in data.world_view_items:
-            if isinstance(item, dict):
-                category = item.get("category", "设定")
-                key = item.get("key", "未知")
-                content_text = item.get("content", "")
-            else:
-                category = getattr(item, "category", "设定")
-                key = getattr(item, "key", "未知")
-                content_text = getattr(item, "content", "")
-
-            print(f"  - 正在生成设定 Embedding: {key}...")
+            item_dict = item if isinstance(item, dict) else item.dict()
+            key = item_dict.get("key", "Unknown")
+            content_text = item_dict.get("content", "")
             emb = get_embedding(f"{key}: {content_text}")
             
-            # Upsert
-            existing = db.query(NovelBible).filter_by(key=key).first()
+            existing = db.query(NovelBible).filter_by(novel_id=novel_id, key=key).first()
             if existing:
-                existing.category = category
                 existing.content = content_text
                 existing.embedding = emb
-                existing.tags = [category]
             else:
-                bible = NovelBible(
-                    category=category,
-                    key=key,
-                    content=content_text,
-                    embedding=emb,
-                    tags=[category]
-                )
-                db.add(bible)
+                db.add(NovelBible(novel_id=novel_id, key=key, content=content_text, embedding=emb, category=item_dict.get("category", "Setting")))
         db.commit()
-        print(f"✔ 已导入 {len(data.world_view_items)} 条世界观设定")
+        print(f"✔ Imported {len(data.world_view_items)} worldview settings.")
 
-        # 2. 保存角色 (Characters)
+        # 2. Save Characters
         for char in data.characters:
-            if isinstance(char, dict):
-                name = char.get("name", "角色")
-                role = char.get("role", "")
-                personality = char.get("personality", "")
-                background = char.get("background", "")
-            else:
-                name = getattr(char, "name", "角色")
-                role = getattr(char, "role", "")
-                personality = getattr(char, "personality", "")
-                background = getattr(char, "background", "")
-                skills = getattr(char, "skills", [])
-                assets = getattr(char, "assets", {})
-            
-            traits = {"role": role, "personality": personality, "background": background}
-            existing_char = db.query(Character).filter_by(name=name).first()
-            if existing_char:
-                existing_char.role = role
-                existing_char.personality_traits = traits
-                existing_char.skills = skills
-                existing_char.assets = assets
-            else:
-                db_char = Character(
-                    name=name,
-                    role=role,
-                    personality_traits=traits,
-                    skills=skills,
-                    assets=assets,
-                    current_mood="平静",
-                    evolution_log=["初始设定导入"],
-                    status={"health": "healthy"}
-                )
-                db.add(db_char)
+            char_dict = char if isinstance(char, dict) else char.dict()
+            name = char_dict.get("name", "Unnamed Character")
+            if not name: continue
+            existing = db.query(Character).filter_by(novel_id=novel_id, name=name).first()
+            if not existing:
+                db.add(Character(novel_id=novel_id, name=name, role=char_dict.get("role"), personality_traits=char_dict.get("personality")))
         db.commit()
-        print(f"✔ 已导入 {len(data.characters)} 个角色")
+        print(f"✔ Imported {len(data.characters)} characters.")
 
-        # 2.5 保存物品 (WorldItems)
-        char_map = {c.name: c.id for c in db.query(Character).all()}
+        # 3. Save Items
+        char_map = {c.name: c.id for c in db.query(Character).filter_by(novel_id=novel_id).all()}
         for item in data.items:
-            if isinstance(item, dict):
-                i_name = item.get("name", "法宝")
-                i_desc = item.get("description", "")
-                i_rarity = item.get("rarity", "凡")
-                i_powers = item.get("powers", {})
-                i_owner = item.get("owner_name")
-                i_loc = item.get("location")
-            else:
-                i_name = getattr(item, "name", "法宝")
-                i_desc = getattr(item, "description", "")
-                i_rarity = getattr(item, "rarity", "凡")
-                i_powers = getattr(item, "powers", {})
-                i_owner = getattr(item, "owner_name", None)
-                i_loc = getattr(item, "location", None)
-            
-            owner_id = char_map.get(i_owner) if i_owner else None
-            existing_item = db.query(WorldItem).filter_by(name=i_name).first()
-            if existing_item:
-                existing_item.description = i_desc
-                existing_item.rarity = i_rarity
-                existing_item.powers = i_powers
-                existing_item.owner_id = owner_id
-                existing_item.location = i_loc
-            else:
-                db_item = WorldItem(
-                    name=i_name,
-                    description=i_desc,
-                    rarity=i_rarity,
-                    powers=i_powers,
-                    owner_id=owner_id,
-                    location=i_loc
-                )
-                db.add(db_item)
+            item_dict = item if isinstance(item, dict) else item.dict()
+            name = item_dict.get("name", "Unnamed Item")
+            if not name: continue
+            owner_id = char_map.get(item_dict.get("owner_name"))
+            existing = db.query(WorldItem).filter_by(novel_id=novel_id, name=name).first()
+            if not existing:
+                db.add(WorldItem(novel_id=novel_id, name=name, description=item_dict.get("description"), owner_id=owner_id))
         db.commit()
-        print(f"✔ 已导入 {len(data.items)} 个关键物品")
+        print(f"✔ Imported {len(data.items)} key items.")
 
-        # 3. 保存大纲 (PlotOutlines)
+        # 4. Save Plot Outlines
         for outline in data.outlines:
-            if isinstance(outline, dict):
-                chapter_number = outline.get("chapter_number", 0)
-                scene_description = outline.get("scene_description", "")
-                key_conflict = outline.get("key_conflict", "")
-            else:
-                chapter_number = getattr(outline, "chapter_number", 0)
-                scene_description = getattr(outline, "scene_description", "")
-                key_conflict = getattr(outline, "key_conflict", "")
-
-            existing_outline = db.query(PlotOutline).filter_by(novel_id=1, chapter_number=chapter_number).first()
-            if existing_outline:
-                existing_outline.scene_description = scene_description
-                existing_outline.key_conflict = key_conflict
-            else:
-                db_outline = PlotOutline(
-                    novel_id=1,
-                    chapter_number=chapter_number,
-                    scene_description=scene_description,
-                    key_conflict=key_conflict,
-                    foreshadowing=[],
-                    recalls=[],
-                    status="pending"
-                )
-                db.add(db_outline)
+            outline_dict = outline if isinstance(outline, dict) else outline.dict()
+            chapter_num = outline_dict.get("chapter_number")
+            if not chapter_num: continue
+            existing = db.query(PlotOutline).filter_by(novel_id=novel_id, chapter_number=chapter_num, branch_id="main").first()
+            if not existing:
+                db.add(PlotOutline(
+                    novel_id=novel_id,
+                    chapter_number=chapter_num,
+                    title=outline_dict.get("title", f"Chapter {chapter_num}"),
+                    summary=outline_dict.get("summary", "No summary provided."),
+                    branch_id="main"
+                ))
         db.commit()
-        print(f"✔ 已导入 {len(data.outlines)} 章大纲")
+        print(f"✔ Imported {len(data.outlines)} plot outlines.")
 
-        # 4. 保存文风 (StyleRef)
-        style = data.style
-        if isinstance(style, dict):
-            tone = style.get("tone", "常规")
-            rhetoric = style.get("rhetoric", [])
-            example_sentence = style.get("example_sentence", "")
-            keywords = style.get("keywords", [])
-        else:
-            tone = getattr(style, "tone", "常规")
-            rhetoric = getattr(style, "rhetoric", [])
-            example_sentence = getattr(style, "example_sentence", "")
-            keywords = getattr(style, "keywords", [])
-        
-        style_content = f"基调: {tone}\n修辞: {', '.join(rhetoric)}\n范例: {example_sentence}"
-        print("  - 正在生成文风 Embedding...")
-        style_emb = get_embedding(style_content)
-        
-        style_ref = StyleRef(
-            content=style_content,
-            embedding=style_emb,
-            source_author="Initial Import",
-            style_metadata={"tone": tone, "keywords": keywords}
-        )
-        db.add(style_ref)
-        db.commit()
-        print("✔ 已导入文风设定")
-        print("\n✨ 所有数据导入完成！")
-        print("现在你可以运行 'python -m src.main' 开始生成了。")
+        # 5. Save Style Reference
+        style_info = data.style if isinstance(data.style, dict) else data.style.dict()
+        example_sentence = style_info.get("example_sentence")
+        if example_sentence:
+            emb = get_embedding(example_sentence)
+            # For simplicity, we store one representative style sentence.
+            # A more complex system could store multiple examples.
+            existing = db.query(StyleRef).filter_by(novel_id=novel_id, source_text=example_sentence).first()
+            if not existing:
+                db.add(StyleRef(novel_id=novel_id, source_text=example_sentence, embedding=emb))
+                db.commit()
+                print("✔ Imported 1 style reference.")
 
-    except Exception as e:
-        db.rollback()
-        print(f"❌ 数据库写入失败: {e}")
     finally:
         db.close()
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Initialize NovelGen project from a document.")
-    parser.add_argument("file", help="Path to the text file containing novel setup.")
-    parser.add_argument("--no-llm", action="store_true")
+async def main():
+    parser = argparse.ArgumentParser(description="NovelGen-Enterprise Data Importer")
+    parser.add_argument("file_path", help="Path to the novel setup document.")
+    parser.add_argument("--novel-id", type=int, help="ID of an existing novel to append data to.")
+    parser.add_argument("--title", help="Title for a new novel to be created.")
+    parser.add_argument("--author", help="Author for a new novel.")
+    parser.add_argument("--description", help="Description for a new novel.")
+    parser.add_argument("--no-llm", action="store_true", help="Use fallback parser instead of LLM.")
+    
     args = parser.parse_args()
-    asyncio.run(import_novel(args.file, use_llm=not args.no_llm))
+
+    db: Session = SessionLocal()
+    novel_id_to_use = args.novel_id
+
+    try:
+        if not novel_id_to_use:
+            if not args.title:
+                print("❌ Error: You must provide either --novel-id or --title.")
+                return
+            
+            new_novel = Novel(
+                title=args.title,
+                author=args.author,
+                description=args.description
+            )
+            db.add(new_novel)
+            db.commit()
+            novel_id_to_use = new_novel.id
+            print(f"✨ Created new novel '{args.title}' with ID: {novel_id_to_use}")
+        else:
+            # Verify the novel exists
+            existing_novel = db.query(Novel).filter_by(id=novel_id_to_use).first()
+            if not existing_novel:
+                print(f"❌ Error: Novel with ID {novel_id_to_use} not found.")
+                return
+            print(f"📚 Appending data to existing novel '{existing_novel.title}' (ID: {novel_id_to_use})")
+
+    finally:
+        db.close()
+    
+    await import_novel_data(args.file_path, novel_id_to_use, use_llm=not args.no_llm)
+
+if __name__ == "__main__":
+    asyncio.run(main())

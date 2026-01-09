@@ -9,12 +9,14 @@ router = APIRouter()
 
 @router.get("/", response_model=List[ChapterResponse])
 def read_chapters(
+    novel_id: int,
     skip: int = 0, 
     limit: int = 100, 
     branch_id: str = "main",
     db: Session = Depends(get_db)
 ):
     chapters = db.query(Chapter).filter(
+        Chapter.novel_id == novel_id,
         Chapter.branch_id == branch_id
     ).order_by(Chapter.chapter_number).offset(skip).limit(limit).all()
     return chapters

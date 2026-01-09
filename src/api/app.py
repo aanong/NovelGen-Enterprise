@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
-from src.api.routes import chapters, characters, generation, outlines
+from src.api.routes import chapters, characters, generation, outlines, novels
 
 app = FastAPI(
     title="NovelGen-Enterprise API",
@@ -21,6 +21,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(novels.router, prefix="/api/novels", tags=["novels"])
 app.include_router(chapters.router, prefix="/api/chapters", tags=["chapters"])
 app.include_router(characters.router, prefix="/api/characters", tags=["characters"])
 app.include_router(outlines.router, prefix="/api/outlines", tags=["outlines"])
