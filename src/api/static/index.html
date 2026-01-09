@@ -31,8 +31,26 @@
             </div>
         </header>
 
+        <!-- 实时生成监控 -->
+        <div v-if="isGenerating || streamingContent" class="mb-8 bg-white rounded-lg shadow-lg border-l-4 border-blue-500 overflow-hidden">
+            <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-800">🚀 正在生成中...</h3>
+                    <p class="text-sm text-gray-600">当前阶段: <span class="font-mono bg-blue-100 text-blue-800 px-2 py-0.5 rounded">{{ currentStep }}</span></p>
+                </div>
+                <div class="animate-pulse flex space-x-2">
+                    <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <div class="w-2 h-2 bg-blue-500 rounded-full animation-delay-200"></div>
+                    <div class="w-2 h-2 bg-blue-500 rounded-full animation-delay-400"></div>
+                </div>
+            </div>
+            <div class="p-6 max-h-96 overflow-y-auto font-serif text-lg leading-relaxed whitespace-pre-wrap bg-gray-50">
+                {{ streamingContent }}<span class="animate-pulse">|</span>
+            </div>
+        </div>
+
         <!-- 状态概览 -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div class="bg-white p-6 rounded-lg shadow">
                 <h3 class="text-lg font-semibold mb-2">已生成章节</h3>
                 <p class="text-4xl font-bold text-blue-600">{{ chapters.length }}</p>
@@ -44,6 +62,11 @@
             <div class="bg-white p-6 rounded-lg shadow">
                 <h3 class="text-lg font-semibold mb-2">大纲进度</h3>
                 <p class="text-4xl font-bold text-green-600">{{ outlines.length }}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">资料库</h3>
+                <p class="text-4xl font-bold text-orange-600">{{ referenceCount || '-' }}</p>
+                <p class="text-xs text-gray-500 mt-1">条目数量</p>
             </div>
         </div>
 
@@ -123,9 +146,13 @@
                 const outlines = ref([]);
                 const isGenerating = ref(false);
                 const selectedChapter = ref(null);
+                
+                // 新增状态
+                const streamingContent = ref('');
+                const currentStep = ref('Ready');
+                const referenceCount = ref(0); // 暂无 API，预留
 
                 const pendingOutlines = computed(() => {
-                    // 简单的过滤，实际应该根据 status
                     const lastChapterNum = chapters.value.length > 0 
                         ? Math.max(...chapters.value.map(c => c.chapter_number)) 
                         : 0;
@@ -149,17 +176,19 @@
                     if (!selectedNovelId.value) return;
                     
                     try {
-                        const [chaptersRes, charsRes, outlinesRes, statusRes] = await Promise.all([
+                        // 并行获取数据
+                        const [chaptersRes, charsRes, outlinesRes] = await Promise.all([
                             axios.get(`/api/chapters/?novel_id=${selectedNovelId.value}`),
                             axios.get(`/api/characters/?novel_id=${selectedNovelId.value}`),
-                            axios.get(`/api/outlines/?novel_id=${selectedNovelId.value}`),
-                            axios.get('/api/generate/status')
+                            axios.get(`/api/outlines/?novel_id=${selectedNovelId.value}`)
                         ]);
                         
                         chapters.value = chaptersRes.data;
                         characters.value = charsRes.data;
                         outlines.value = outlinesRes.data;
-                        isGenerating.value = statusRes.data.is_generating;
+                        
+                        // 检查是否有正在进行的任务（可选，如果后端支持查询当前任务状态）
+                        // 目前主要依赖 SSE 保持状态
                     } catch (error) {
                         console.error('Error fetching data:', error);
                     }
@@ -170,37 +199,82 @@
                     
                     try {
                         isGenerating.value = true;
-                        await axios.post('/api/generate/', { 
+                        streamingContent.value = '';
+                        currentStep.value = 'Initializing...';
+                        
+                        // 1. 触发生成任务
+                        const res = await axios.post('/api/generate/', { 
                             novel_id: selectedNovelId.value,
                             branch_id: 'main' 
                         });
-                        // 轮询状态
-                        pollStatus();
+                        
+                        const taskId = res.data.task_id;
+                        console.log(`Task started: ${taskId}`);
+                        
+                        // 2. 建立 SSE 连接
+                        startStream(taskId);
+                        
                     } catch (error) {
                         console.error('Error triggering generation:', error);
                         isGenerating.value = false;
+                        currentStep.value = 'Error';
                         alert('生成启动失败: ' + (error.response?.data?.detail || error.message));
                     }
                 };
 
-                const pollStatus = () => {
-                    const interval = setInterval(async () => {
+                const startStream = (taskId) => {
+                    const eventSource = new EventSource(`/api/generate/stream/${taskId}`);
+                    
+                    eventSource.onmessage = (event) => {
+                        // 默认消息处理（如果有）
+                        console.log('SSE Message:', event.data);
+                    };
+
+                    eventSource.addEventListener('token', (event) => {
+                        // 处理生成的文本片段
+                        // 注意：event.data 可能是 JSON 字符串，也可能是纯文本，取决于后端实现
+                        // 假设后端发送的是纯文本 token
                         try {
-                            const res = await axios.get('/api/generate/status');
-                            isGenerating.value = res.data.is_generating;
-                            if (!isGenerating.value) {
-                                clearInterval(interval);
-                                fetchData(); // 生成完成后刷新数据
-                                alert('章节生成完成！');
-                            }
+                            // 尝试解析 JSON，如果后端包装了
+                            const data = JSON.parse(event.data);
+                            streamingContent.value += (data.content || data); 
                         } catch (e) {
-                            clearInterval(interval);
+                            // 纯文本
+                            streamingContent.value += event.data;
                         }
-                    }, 2000);
+                        
+                        // 自动滚动到底部
+                        // const container = document.querySelector('.max-h-96');
+                        // if (container) container.scrollTop = container.scrollHeight;
+                    });
+
+                    eventSource.addEventListener('status', (event) => {
+                        // 更新当前步骤状态
+                        currentStep.value = event.data;
+                        console.log('Status update:', event.data);
+                        
+                        if (event.data === 'completed' || event.data === 'failed') {
+                            eventSource.close();
+                            isGenerating.value = false;
+                            fetchData(); // 刷新数据
+                            if (event.data === 'completed') {
+                                alert('章节生成完成！');
+                            } else {
+                                alert('生成失败，请查看日志。');
+                            }
+                        }
+                    });
+
+                    eventSource.onerror = (error) => {
+                        console.error('SSE Error:', error);
+                        eventSource.close();
+                        isGenerating.value = false;
+                        // 如果连接断开但任务还在跑，可能需要重连逻辑，这里简化处理
+                        fetchData();
+                    };
                 };
 
                 const viewChapter = async (chapter) => {
-                    // 获取完整内容
                     try {
                         const res = await axios.get(`/api/chapters/${chapter.id}`);
                         selectedChapter.value = res.data;
@@ -227,6 +301,9 @@
                     pendingOutlines,
                     isGenerating,
                     selectedChapter,
+                    streamingContent,
+                    currentStep,
+                    referenceCount,
                     fetchData,
                     triggerGeneration,
                     viewChapter,
