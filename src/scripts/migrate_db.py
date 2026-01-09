@@ -42,6 +42,9 @@ def upgrade_database():
         
         columns_to_add = [
             ("chapters", "chapter_number", "ALTER TABLE chapters ADD COLUMN IF NOT EXISTS chapter_number INTEGER"),
+            ("chapters", "branch_id", "ALTER TABLE chapters ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100) DEFAULT 'main'"),
+            ("chapters", "previous_chapter_id", "ALTER TABLE chapters ADD COLUMN IF NOT EXISTS previous_chapter_id INTEGER REFERENCES chapters(id)"),
+            ("plot_outlines", "branch_id", "ALTER TABLE plot_outlines ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100) DEFAULT 'main'"),
             ("logic_audits", "chapter_id", "ALTER TABLE logic_audits ADD COLUMN IF NOT EXISTS chapter_id INTEGER"),
         ]
         
@@ -51,7 +54,12 @@ def upgrade_database():
                 db.execute(text(sql))
                 print(f"  ✅ 列 {table}.{column} 已添加/验证")
             except Exception as e:
-                print(f"  ℹ️ 列 {table}.{column} 可能已存在: {e}")
+                print(f"  ℹ️ 列 {table}.{column} 可能已存在或添加失败: {e}")
+        
+        # 4. 确保新表 CharacterBranchStatus 存在
+        # Base.metadata.create_all 应该已经处理了，但为了保险起见，我们可以显式检查
+        # 这里我们依赖 Base.metadata.create_all(bind=engine) 在第 1 步已经执行
+
         
         db.commit()
         print("✅ 数据库迁移完成！")

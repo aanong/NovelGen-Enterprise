@@ -31,6 +31,7 @@
 - **Strict Schema**:
   - `style_ref`: 存储原著片段的 Embedding (用于RAG检索文风)。
   - `characters`: 存储人物档案，包含 `personality_traits`, `relationships`, `evolution_log` (JSONB)。
+  - `character_branch_statuses`: 存储人物在特定分支、特定章节的状态快照，用于分支回溯。
   - `chapters`: 存储生成内容，包含 `branch_id` (分支标识) 和 `previous_chapter_id` (链表结构，用于回溯上下文)。
   - `plot_outlines`: 存储分章大纲，支持多分支 (`branch_id`)。
 
@@ -71,6 +72,7 @@
   1. 数据库 `chapters` 和 `plot_outlines` 表通过 `branch_id` 区分不同分支。
   2. 上下文加载时，通过 `previous_chapter_id` 链表回溯，确保只加载当前分支的历史。
   3. 提供 API 接口切换当前分支，实现不同走向的续写。
+  4. **状态快照**: 在每章生成后，自动保存 `CharacterBranchStatus`，确保切换分支时能恢复对应的人物状态（心情、技能、资产）。
 
 ### 3.6 可视化交互 (Visual Interaction)
 - **Rule**: 提供直观的界面用于监控和干预。
@@ -105,3 +107,5 @@
 5. **Module 4 (Memory)**: 实现人物状态更新与上下文检索机制。 (✅ Completed)
 6. **Module 5 (API & UI)**: 实现 FastAPI 后端与 Vue 前端，提供可视化操作界面。 (✅ Completed)
 7. **Module 6 (Optimization)**: 引入 Docker 部署，优化大纲生成策略 (Refine Mode)。 (✅ Completed)
+8. **Module 7 (Multi-Branch)**: 完善多线叙事支持，实现分支状态快照与回溯机制。 (✅ Completed)
+             
