@@ -277,6 +277,66 @@ class NGEGraph:
                                 if db_item:
                                     db_item.owner_id = db_char.id
                                     db_item.location = f"Character: {name}"
+                        
+                        # 处理物品丢失/消耗
+                        if "lost_items" in changes:
+                            from .db.models import WorldItem
+                            for item_name in changes["lost_items"]:
+                                db_item = db.query(WorldItem).filter_by(name=item_name).first()
+                                if db_item and db_item.owner_id == db_char.id:
+                                    db_item.owner_id = None
+                                    db_item.location = "Lost/Consumed"
+
+                        # 处理关系变更
+                        if "relationship_changes" in changes:
+                            for rel_change in changes["relationship_changes"]:
+                                target_name = rel_change.get("target")
+                                change_type = rel_change.get("change_type")
+                                value = rel_change.get("value", 0.0)
+                                
+                                target_char = db.query(Character).filter_by(name=target_name).first()
+                                if target_char:
+                                    # 查找现有关系 (A-B 或 B-A)
+                                    rel = db.query(CharacterRelationship).filter(
+                                        ((CharacterRelationship.char_a_id == db_char.id) & (CharacterRelationship.char_b_id == target_char.id)) |
+                                        ((CharacterRelationship.char_a_id == target_char.id) & (CharacterRelationship.char_b_id == db_char.id))
+                                    ).first()
+                                    
+                                    if not rel:
+                                        rel = CharacterRelationship(
+                                            char_a_id=db_char.id,
+                                            char_b_id=target_char.id,
+                                            relation_type="Neutral",
+                                            intimacy=0.0,
+                                            history=[]
+                                        )
+                                        db.add(rel)
+                                    
+                                    # 更新亲密度
+                                    rel.intimacy = max(-1.0, min(1.0, rel.intimacy + value))
+                                    # 记录历史
+                                    if not rel.history: rel.history = []
+                                    # 确保 history 是列表
+                                    if isinstance(rel.history, str):
+                                        try:
+                                            rel.history = json.loads(rel.history)
+                                        except:
+                                            rel.history = []
+                                    
+                                    # 使用 list.append 而不是重新赋值，以确保 SQLAlchemy 追踪变更 (对于 JSON 类型有时需要 flag_modified，但这里重新赋值给 rel.history 应该可以)
+                                    new_history = list(rel.history)
+                                    new_history.append({
+                                        "chapter": state.current_plot_index + 1,
+                                        "event": change_type,
+                                        "change": value
+                                    })
+                                    rel.history = new_history
+                                    
+                                    # 更新关系类型 (简单逻辑)
+                                    if rel.intimacy > 0.6: rel.relation_type = "Ally"
+                                    elif rel.intimacy > 0.2: rel.relation_type = "Friendly"
+                                    elif rel.intimacy < -0.6: rel.relation_type = "Enemy"
+                                    elif rel.intimacy < -0.2: rel.relation_type = "Hostile"
             
             # 2. 保存章节 (Upsert)
             chapter_num = state.current_plot_index + 1

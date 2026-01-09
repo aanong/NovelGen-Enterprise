@@ -98,9 +98,10 @@ class ReviewerAgent:
                 "- new_mood: 变化后的心情描述\n"
                 "- evolution_summary: 本章成长/变化摘要\n"
                 "- new_skills: 本章习得的新技能列表 (若无则为空列表)\n"
-                "- asset_changes: 资产变动 (如 {{'灵石': -10}}) (若无则为空字典)\n"
+                "- asset_changes: 资产变动 (如 {'灵石': -10}) (若无则为空字典)\n"
                 "- acquired_items: 本章获得的关键物品名称列表 (若无则为空列表)\n"
-                "- relationship_changes: 关系变动描述\n"
+                "- lost_items: 本章失去/消耗的关键物品名称列表 (若无则为空列表)\n"
+                "- relationship_changes: 关系变动列表，每项需包含 {'target': '对方名', 'change_type': '类型', 'value': 0.1} (若无则为空列表)\n"
                 "- summary: 整个章节的文字总结 (String)"
             ))
         ])

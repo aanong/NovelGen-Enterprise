@@ -9,7 +9,7 @@ class StyleRef(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(JSON) # Fallback to JSON if pgvector is not available
+    embedding = Column(Vector(768)) # 使用 pgvector 存储 768 维向量
     source_author = Column(String(255))
     style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征
 
@@ -21,7 +21,7 @@ class NovelBible(Base):
     category = Column(String(100), index=True) 
     key = Column(String(255), unique=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(JSON) # Fallback to JSON if pgvector is not available
+    embedding = Column(Vector(768)) # 使用 pgvector 存储 768 维向量
     importance = Column(Integer, default=5)
     tags = Column(JSON)
     

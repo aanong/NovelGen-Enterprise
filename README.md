@@ -13,9 +13,9 @@
 ## ✨ 核心亮点
 
 - **🧠 逻辑与文学分离**: 所有的剧情拆解、逻辑审计由推理能力极强的 **DeepSeek-R1** 负责；所有的文风模仿、细节描写由具备超长上下文的 **Gemini-2.0** 负责。
-- **📉 动态上下文精炼 (Context Refiner)**: 系统不再一股脑填塞所有设定，而是通过 RAG 技术，仅提取当前章节最相关的 5% 设定，极大提升了生成的专注度。
+- **📉 动态上下文精炼 (Context Refiner)**: 集成 **pgvector** 向量数据库，实现基于语义的 RAG 检索。系统不再一股脑填塞所有设定，而是精准提取与当前剧情最相关的世界观和文风片段。
 - **⚖️ 自动化逻辑审计**: 每一章都会经过 `Reviewer Agent` 的毒舌扫描，检查是否有逻辑硬伤或 OOC。
-- **🔄 持久化记忆链接**: 角色好感度、心境变化和最近三章的摘要被实时存入数据库，确保剧情万章不乱。
+- **🔄 角色状态实时演化**: 真正的动态世界！系统会根据剧情自动更新角色的**技能列表**、**物品背包**（获得/消耗）以及**人际关系**（亲密度/结盟/敌对），确保人物随故事成长。
 - **🔍 AI 设定审查**: 内置 `review_setup.py` 脚本，可在导入前对设定进行深度逻辑审查和自动完善。
 
 ---
@@ -24,7 +24,7 @@
 
 ### 1. 环境依赖
 *   **Python**: 3.10+ (推荐 3.12)
-*   **Database**: PostgreSQL 16+ (可选 `pgvector` 扩展)
+*   **Database**: PostgreSQL 16+ (必须安装 `pgvector` 扩展以支持向量检索)
 *   **Local LLM**: [Ollama](https://ollama.com/) (需运行 `ollama run deepseek-r1:7b`)
 
 ### 2. 安装依赖
@@ -125,7 +125,7 @@ python -m src.main
 NovelGen-Enterprise/
 ├── src/
 │   ├── agents/          # 智能体 (Architect, Writer, Reviewer, Learner)
-│   ├── db/              # 数据库层 (Models, SessionLocal)
+│   ├── db/              # 数据库层 (Models, SessionLocal, VectorStore)
 │   ├── schemas/         # 数据协议 (Pydantic Models)
 │   ├── scripts/         # 工具脚本
 │   │   ├── import_novel.py    # 导入设定
@@ -141,7 +141,8 @@ NovelGen-Enterprise/
 
 ## 🏗 开源路线图
 - [x] **设定审查系统**: 使用 Gemini 3 Pro 进行逻辑审查
-- [ ] **RAG 向量搜索**: 实现世界观设定的语义检索
+- [x] **RAG 向量搜索**: 实现世界观设定的语义检索 (pgvector)
+- [x] **角色状态演化**: 实时更新技能、物品消耗及人际关系
 - [ ] **可视化界面**: 基于 Next.js 的创作 Dashboard
 - [ ] **多线剧情分支**: 支持生成多个结局路径
 
