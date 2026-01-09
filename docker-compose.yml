@@ -9,6 +9,8 @@ services:
       - .:/app
     env_file:
       - .env
+    ports:
+      - "8000:8000"
     depends_on:
       - db
     command: tail -f /dev/null # 保持容器运行，以便进入执行命令

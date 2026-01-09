@@ -42,6 +42,13 @@
    ```
    *后续所有命令均在容器内执行。*
 
+5. **启动 Web 界面 (可选)**:
+   在容器内运行：
+   ```bash
+   python src/run_server.py
+   ```
+   访问: [http://localhost:8000](http://localhost:8000)
+
 ### 方式二：本地手动安装
 <details>
 <summary>点击展开详细步骤</summary>
@@ -194,11 +201,14 @@ python -m src.scripts.export_novel --branch main --output main_story.md
 NovelGen-Enterprise/
 ├── src/
 │   ├── agents/          # 智能体 (Architect, Writer, Reviewer, Learner)
+│   ├── api/             # 后端 API & 前端界面 (FastAPI + Vue)
 │   ├── db/              # 数据库层 (Models, SessionLocal, VectorStore)
 │   ├── schemas/         # 数据协议 (Pydantic Models)
 │   ├── scripts/         # 工具脚本
 │   │   ├── import_novel.py    # 导入设定
-│   │   └── review_setup.py    # 审查设定 (NEW!)
+│   │   ├── review_setup.py    # 审查设定
+│   │   ├── generate_outline.py # 大纲生成
+│   │   └── export_novel.py    # 导出小说
 │   ├── graph.py         # LangGraph 状态机
 │   └── main.py          # 主入口
 ├── sample_inputs/       # 示例设定
