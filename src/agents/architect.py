@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from ..schemas.state import PlotPoint, NGEState
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text
+from ..db.vector_store import VectorStore
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -48,12 +49,21 @@ class ArchitectAgent:
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
         self.plan_parser = PydanticOutputParser(pydantic_object=ChapterPlan)
         self.full_outline_parser = PydanticOutputParser(pydantic_object=FullNovelOutline)
+        self.vector_store = VectorStore()
 
     async def generate_chapter_outlines(self, synopsis: str, world_view: str, total_chapters: int = 10) -> List[ChapterOutline]:
         """
         Rule 3.4: 全书大纲预生成
         将核心梗概拆解为具体的分章大纲。
         """
+        # 检索参考资料
+        references = await self.vector_store.search_references(synopsis, top_k=2)
+        ref_context = ""
+        if references:
+            ref_context = "\n【参考资料】\n"
+            for ref in references:
+                ref_context += f"- {ref['title']}: {ref['content'][:100]}...\n"
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个网文总策划。任务是将一个简短的故事梗概拆解为详细的分章大纲。\n"
@@ -62,6 +72,7 @@ class ArchitectAgent:
                 "2. 每一章都要有明确的冲突和推进。\n"
                 "3. 严格遵守世界观设定：{world_view}\n"
                 "4. 确保剧情节奏张弛有度（起承转合）。\n"
+                "{ref_context}\n"
                 "输出格式必须为 JSON。\n"
                 "{format_instructions}"
             )),
@@ -74,6 +85,7 @@ class ArchitectAgent:
                 "world_view": world_view,
                 "synopsis": synopsis,
                 "total_chapters": total_chapters,
+                "ref_context": ref_context,
                 "format_instructions": self.full_outline_parser.get_format_instructions()
             })
             return result.chapters
@@ -130,6 +142,14 @@ class ArchitectAgent:
         """
         根据用户输入的简单大纲，扩充为精细化的大纲。
         """
+        # 检索参考资料
+        references = await self.vector_store.search_references(user_prompt, top_k=2)
+        ref_context = ""
+        if references:
+            ref_context = "\n【参考资料】\n"
+            for ref in references:
+                ref_context += f"- {ref['title']}: {ref['content'][:100]}...\n"
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个严谨的网文主编和架构师。擅长构建逻辑严密、节奏感强的小说大纲。\n"
@@ -137,6 +157,7 @@ class ArchitectAgent:
                 "1. 严禁逻辑漏洞。\n"
                 "2. 每个剧情点必须包含明确的冲突和推进作用。\n"
                 "3. 世界观限制：{world_view}\n"
+                "{ref_context}\n"
                 "输出格式必须为 JSON。\n"
                 "{format_instructions}"
             )),
@@ -147,6 +168,7 @@ class ArchitectAgent:
         result = await chain.ainvoke({
             "world_view": world_view,
             "user_prompt": user_prompt,
+            "ref_context": ref_context,
             "format_instructions": self.outline_parser.get_format_instructions()
         })
         return result.expanded_points

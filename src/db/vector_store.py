@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 from sqlalchemy import text
 from .base import SessionLocal
-from .models import NovelBible, StyleRef
+from .models import NovelBible, StyleRef, ReferenceMaterial
 from ..utils import get_embedding
 
 class VectorStore:
@@ -28,6 +28,59 @@ class VectorStore:
         v1 = np.array(v1)
         v2 = np.array(v2)
         return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+    async def search_references(self, query: str, top_k: int = 3, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """搜索通用参考资料"""
+        query_vector = get_embedding(query)
+        
+        filters = []
+        if category:
+            filters.append(ReferenceMaterial.category == category)
+            
+        if self.has_pgvector:
+            try:
+                q = self._db.query(ReferenceMaterial)
+                if filters:
+                    q = q.filter(*filters)
+                    
+                items = q.order_by(
+                    ReferenceMaterial.embedding.l2_distance(query_vector)
+                ).limit(top_k).all()
+                
+                return [{
+                    "title": item.title,
+                    "content": item.content,
+                    "source": item.source,
+                    "category": item.category
+                } for item in items]
+            except Exception as e:
+                print(f"Native vector search failed (References): {e}")
+        
+        # Fallback
+        try:
+            q = self._db.query(ReferenceMaterial)
+            if filters:
+                q = q.filter(*filters)
+            all_items = q.all()
+            
+            results = []
+            for item in all_items:
+                if item.embedding:
+                    sim = self._cosine_similarity(query_vector, item.embedding)
+                    results.append((sim, item))
+            
+            results.sort(key=lambda x: x[0], reverse=True)
+            
+            return [{
+                "title": item.title,
+                "content": item.content,
+                "source": item.source,
+                "category": item.category,
+                "score": float(score)
+            } for score, item in results[:top_k]]
+        except Exception as e:
+            print(f"Fallback vector search failed (References): {e}")
+            return []
 
     async def search_bible(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """搜索世界观设定 (Novel Bible) 使用向量相似度"""

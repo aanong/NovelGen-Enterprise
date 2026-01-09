@@ -16,6 +16,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..config import Config
+from ..db.vector_store import VectorStore
 
 load_dotenv()
 
@@ -29,21 +30,20 @@ class SetupReviewer:
             temperature=Config.model.SETUP_REVIEWER_TEMP,
             google_api_key=Config.model.GEMINI_API_KEY
         )
+        self.vector_store = VectorStore()
     
     async def review_and_enhance(self, raw_setup: str) -> dict:
         """
         对原始设定进行全方位审查和增强
-        
-        Returns:
-            {
-                "logic_issues": List[str],  # 发现的逻辑漏洞
-                "cultivation_analysis": str,  # 修炼体系分析
-                "enhanced_outline": str,  # 完善后的大纲
-                "character_relations": str,  # 补充的人物关系网
-                "world_locations": str,  # 补充的地理位置
-                "final_setup": str  # 最终完善版设定
-            }
         """
+        # 1. 检索相关参考资料
+        print("📚 正在检索经典文献资料...")
+        references = await self.vector_store.search_references(raw_setup, top_k=3)
+        ref_context = ""
+        if references:
+            ref_context = "\n【参考资料库推荐】\n"
+            for ref in references:
+                ref_context += f"- **{ref['title']}** ({ref['category']}): {ref['content'][:200]}...\n"
         
         review_prompt = ChatPromptTemplate.from_messages([
             ("system", (
@@ -59,6 +59,7 @@ class SetupReviewer:
                 "- 地点名：参考《山海经》的山川名（如'不周山''归墟''扶桑''青丘'）、《淮南子》的天文地理（如'九州''四海''八极'）、《楚辞》的神话空间（如'阊阖''瑶台''云梦'）。\n"
                 "- 异兽/神物：参考《搜神记》《山海经》中的神兽（如'烛龙''毕方''鲲鹏''九尾狐'）。\n"
                 "- 势力名：结合古典意象，体现其特质（如'蓬莱仙阁''归藏书院''太玄道宗'）。\n\n"
+                "{ref_context}\n"
                 "请以专业编辑的角度，提供详细的审查报告和改进建议。"
             )),
             ("human", (
@@ -88,7 +89,7 @@ class SetupReviewer:
         
         print("🔍 正在调用 Gemini 3 Pro 进行深度审查...")
         response = await self.llm.ainvoke(
-            review_prompt.format(raw_setup=raw_setup)
+            review_prompt.format(raw_setup=raw_setup, ref_context=ref_context)
         )
         
         content = response.content

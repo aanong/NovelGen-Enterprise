@@ -35,6 +35,20 @@ class StyleRef(Base):
     # 可选：关联特定小说，为空则为全局通用
     novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=True, index=True)
 
+class ReferenceMaterial(Base):
+    """通用资料库/经典文献 (用于初始化设定参考)"""
+    __tablename__ = "reference_materials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), index=True) # 标题/书名/条目名
+    content = Column(Text, nullable=False)  # 内容片段
+    embedding = Column(Vector(768))         # 向量
+    source = Column(String(255))            # 来源（作者/书名）
+    category = Column(String(100), index=True) # 分类：world_setting(世界观), plot_trope(剧情), character_archetype(人物原型), style(文风)
+    tags = Column(JSON)                     # 标签列表
+    
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class NovelBible(Base):
     """世界观/设定集 (Novel Bible)"""
     __tablename__ = "novel_bible"
