@@ -162,6 +162,16 @@ python -m src.main
 - **Rule 5.2**: 第 3 次审核失败后强制通过并标记
 - **Rule 4.1**: 自动过滤 DeepSeek-R1 的 `<think>` 标签
 
+### 如何导出小说？
+你可以将已生成的章节导出为 Markdown 文件，方便阅读和编辑：
+```bash
+python -m src.scripts.export_novel --output my_novel.md
+```
+支持指定分支导出（默认为 `main`）：
+```bash
+python -m src.scripts.export_novel --branch main --output main_story.md
+```
+
 ---
 
 ## 📁 项目结构
