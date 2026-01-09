@@ -185,6 +185,12 @@ NGE 提供了强大的 CLI 工具，用于快速测试和批处理。
     ```
     这将自动导入内置的经典设定（如修真境界、赛博朋克元素等）到向量数据库。
 
+*   **导入自定义资料**:
+    ```bash
+    python -m src.scripts.import_references ./my_data.json
+    ```
+    支持从 JSON 文件批量导入自定义资料。
+
 *   **审查设定**:
     ```bash
     python -m src.scripts.review_setup ./sample_inputs/novel_setup.txt
