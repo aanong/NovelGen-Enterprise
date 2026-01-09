@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # 核心应用服务
+  app:
+    build: .
+    container_name: novelgen-app
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+    command: tail -f /dev/null # 保持容器运行，以便进入执行命令
+    networks:
+      - novelgen-net
+
+  # 向量数据库服务
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: novelgen-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-novelgen}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - novelgen-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  novelgen-net:
+    driver: bridge

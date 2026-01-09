@@ -22,6 +22,30 @@
 
 ## 🛠 快速开始
 
+### 方式一：Docker 极速启动 (推荐)
+这是最快、最稳定的方式，无需手动安装数据库。
+
+1. **安装 Docker**: 确保已安装 Docker Desktop。
+2. **配置环境**:
+   ```bash
+   cp .env.example .env
+   # 编辑 .env 填入 API Key
+   # 数据库 URL 请使用: postgresql://postgres:password@db:5432/novelgen
+   ```
+3. **启动服务**:
+   ```bash
+   docker-compose up -d
+   ```
+4. **进入容器**:
+   ```bash
+   docker-compose exec app bash
+   ```
+   *后续所有命令均在容器内执行。*
+
+### 方式二：本地手动安装
+<details>
+<summary>点击展开详细步骤</summary>
+
 ### 1. 环境依赖
 *   **Python**: 3.10+ (推荐 3.12)
 *   **Database**: PostgreSQL 16+ (必须安装 `pgvector` 扩展以支持向量检索)
@@ -43,10 +67,30 @@ cp .env.example .env
 *   `GOOGLE_API_KEY`: 申请 [Google AI Studio](https://aistudio.google.com/)
 *   `POSTGRES_URL`: 你的数据库连接字符串
 
+</details>
+
 ### 4. 初始化数据库
 ```bash
 python -m src.db.init_db
 ```
+
+---
+
+## ⚡ 性能与成本优化指南
+
+为了在企业级应用中平衡效果与成本，建议遵循以下最佳实践：
+
+### 1. 增量大纲生成 (降低成本)
+不要一次性生成 100 章大纲。建议采用 **"5+N" 策略**：
+- 先生成前 5 章：`python -m src.scripts.generate_outline ... --chapters 5`
+- 试写满意后，使用 `--refine` 模式续写后续章节。
+- **收益**: 避免因大纲方向错误导致的 Token 浪费，节省约 80% 的试错成本。
+
+### 2. 设定审查缓存 (提升效率)
+`review_setup.py` 运行较慢。如果设定文件未修改，请直接使用上次生成的 `enhanced_setup.txt`，无需重复审查。
+
+### 3. 数据库连接池 (提升并发)
+项目已配置 SQLAlchemy 连接池。在生产环境中，建议在 `.env` 中调整 `DB_POOL_SIZE` 以匹配并发写作者数量。
 
 ---
 
