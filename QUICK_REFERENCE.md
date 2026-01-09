@@ -135,8 +135,8 @@ python -m src.scripts.import_novel ./reviewed_setups/enhanced_setup.txt
 
 ### 生成章节
 ```bash
-# 生成下一章
-python -m src.main
+# 生成下一章 (需指定 Novel ID)
+python -m src.main run --novel-id 1
 ```
 
 ### 验证优化

@@ -74,6 +74,9 @@ class DatabaseConfig:
     MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
     POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))
 
+class RedisConfig:
+    """Redis 配置"""
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 class WritingConfig:
     """写作配置"""
@@ -96,6 +99,7 @@ class Config:
     antigravity = AntigravityConfig
     model = ModelConfig
     database = DatabaseConfig
+    redis = RedisConfig
     writing = WritingConfig
     
     # 项目信息

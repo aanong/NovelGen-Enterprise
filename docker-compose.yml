@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 核心应用服务
+  # 核心应用服务 (API)
   app:
     build: .
     container_name: novelgen-app
@@ -13,7 +13,24 @@ services:
       - "8000:8000"
     depends_on:
       - db
-    command: tail -f /dev/null # 保持容器运行，以便进入执行命令
+      - redis
+    command: python -m src.api.run_server
+    networks:
+      - novelgen-net
+
+  # Celery Worker (后台任务)
+  worker:
+    build: .
+    container_name: novelgen-worker
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    # 在 Linux 容器中通常不需要 -P solo，但在某些资源受限环境可能更稳定
+    command: celery -A src.worker.celery_app worker --loglevel=info
     networks:
       - novelgen-net
 
@@ -36,6 +53,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Redis 消息队列
+  redis:
+    image: redis:7-alpine
+    container_name: novelgen-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - novelgen-net
 
 volumes:
   postgres_data:

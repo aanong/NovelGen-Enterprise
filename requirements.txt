@@ -11,3 +11,6 @@ python-dotenv
 asyncpg
 fastapi
 uvicorn
+celery[redis]
+redis
+sse-starlette
