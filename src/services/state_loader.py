@@ -1,4 +1,4 @@
-from src.schemas.state import NGEState, NovelBible, character_state, PlotPoint, MemoryContext, WorldItemSchema
+from src.schemas.state import NGEState, NovelBible, CharacterState, PlotPoint, MemoryContext, WorldItemSchema
 from src.schemas.style import StyleFeatures
 from src.db.base import SessionLocal
 from src.db.models import Novel, NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle, WorldItem as DBWorldItem
@@ -27,7 +27,7 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
         bible_content = "\n".join([f"{b.key}: {b.content}" for b in db_bible])
         
         characters = {
-            c.name: character_state(
+            c.name: CharacterState(
                 name=c.name,
                 personality_traits=c.personality_traits or {},
                 skills=c.skills or [],
@@ -42,7 +42,7 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
         plot_progress = [
             PlotPoint(
                 id=str(o.id),
-                title=f"第{o.chapter_number}章", # 简化处理
+                title=o.title or f"第{o.chapter_number}章",
                 description=o.scene_description or "无描述",
                 key_events=[o.key_conflict] if o.key_conflict else []
             ) for o in db_outlines

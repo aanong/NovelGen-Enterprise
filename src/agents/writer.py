@@ -1,28 +1,40 @@
 import os
 import re
 import json
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from ..schemas.state import NGEState
 from ..config import Config
-from ..utils import strip_think_tags
+from ..utils import strip_think_tags, normalize_llm_content
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class WriterAgent:
     """
-    Writer Agent (DeepSeek): 负责正文撰写与文风模仿。
-    利用 DeepSeek 的细节生成能力和高性价比。
-    遵循 Rule 1.2: DeepSeek 为相（正文大规模叙述）
+    Writer Agent (DeepSeek -> Gemini): 负责正文撰写与文风模仿。
+    Switching to Gemini for stability in this environment.
     """
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model=Config.model.DEEPSEEK_MODEL,
-            openai_api_key=Config.model.DEEPSEEK_API_KEY,
-            openai_api_base=Config.model.DEEPSEEK_API_BASE,
-            temperature=Config.model.GEMINI_TEMPERATURE
-        )
+        if Config.model.GEMINI_MODEL == "mock":
+            from ..utils import MockChatModel
+            self.llm = MockChatModel(responses=[
+                "当前遵循：Normal 场景\n这是一个用于测试的章节正文。主角李青云站在青云山巅，俯瞰着云海。"
+            ])
+        elif "localhost" in Config.model.DEEPSEEK_API_BASE or Config.model.DEEPSEEK_API_KEY == "ollama":
+            self.llm = ChatGoogleGenerativeAI(
+                model=Config.model.GEMINI_MODEL,
+                google_api_key=Config.model.GEMINI_API_KEY,
+                temperature=Config.model.GEMINI_TEMPERATURE
+            )
+        else:
+            self.llm = ChatOpenAI(
+                model=Config.model.DEEPSEEK_MODEL,
+                openai_api_key=Config.model.DEEPSEEK_API_KEY,
+                openai_api_base=Config.model.DEEPSEEK_API_BASE,
+                temperature=Config.model.GEMINI_TEMPERATURE
+            )
 
     async def write_chapter(self, state: NGEState, plan_instruction: str) -> str:
         """
@@ -127,7 +139,8 @@ class WriterAgent:
             plan_instruction=plan_instruction
         )
         response = await self.llm.ainvoke(messages)
-        content = strip_think_tags(response.content)
+        content = normalize_llm_content(response.content)
+        content = strip_think_tags(content)
         
         # Rule 6.2 & 4.1: 清理验证前缀和思考标签
         content = re.sub(r'^当前遵循：.*?\n', '', content).strip()

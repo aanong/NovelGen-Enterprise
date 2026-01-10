@@ -8,7 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from ..schemas.state import PlotPoint, NGEState
 from ..config import Config
-from ..utils import strip_think_tags, extract_json_from_text
+from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from ..db.vector_store import VectorStore
 from dotenv import load_dotenv
 
@@ -41,11 +41,26 @@ class ArchitectAgent:
     """
     def __init__(self):
         # 使用配置文件中的设置
-        self.llm = ChatGoogleGenerativeAI(
-            model=Config.model.GEMINI_MODEL,
-            google_api_key=Config.model.GEMINI_API_KEY,
-            temperature=Config.model.DEEPSEEK_ARCHITECT_TEMP
-        )
+        if Config.model.GEMINI_MODEL == "mock":
+            from ..utils import MockChatModel
+            self.llm = MockChatModel(responses=[
+                # Response for generate_chapter_outlines
+                json.dumps({"chapters": [
+                    {"chapter_number": 1, "title": "Ch1", "scene_description": "Scene 1", "key_conflict": "Conflict 1", "foreshadowing": []},
+                    {"chapter_number": 2, "title": "Ch2", "scene_description": "Scene 2", "key_conflict": "Conflict 2", "foreshadowing": []},
+                    {"chapter_number": 3, "title": "Ch3", "scene_description": "Scene 3", "key_conflict": "Conflict 3", "foreshadowing": []}
+                ]}),
+                # Response for plan_next_chapter (called by Writer/Graph)
+                json.dumps({"thinking": "Think", "scene_description": "Scene", "key_conflict": "Conflict", "instruction": "Write"}),
+                # More responses if needed
+                json.dumps({"thinking": "Think", "scene_description": "Scene", "key_conflict": "Conflict", "instruction": "Write"}),
+            ])
+        else:
+            self.llm = ChatGoogleGenerativeAI(
+                model=Config.model.GEMINI_MODEL,
+                google_api_key=Config.model.GEMINI_API_KEY,
+                temperature=Config.model.DEEPSEEK_ARCHITECT_TEMP
+            )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
         self.plan_parser = PydanticOutputParser(pydantic_object=ChapterPlan)
         self.full_outline_parser = PydanticOutputParser(pydantic_object=FullNovelOutline)
@@ -218,7 +233,7 @@ class ArchitectAgent:
         prompt_value = prompt.format_prompt(**input_data)
         try:
             response = await self.llm.ainvoke(prompt_value.to_messages())
-            content_str = response.content
+            content_str = normalize_llm_content(response.content)
             
             # Rule 4.1: 使用工具函数过滤 <think> 标签
             content_str = strip_think_tags(content_str)

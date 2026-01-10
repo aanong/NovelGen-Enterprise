@@ -8,3 +8,4 @@ class StyleFeatures(BaseModel):
     emotional_tone: str = Field(description="整体的情绪色调，如：'忧郁'、'热血'、'清冷'")
     vocabulary_preference: List[str] = Field(description="偏好使用的词汇类型或特定词汇")
     rhythm_description: str = Field(description="文字节奏的描述")
+    example_sentences: List[str] = Field(default_factory=list, description="风格示例句子")

@@ -4,9 +4,9 @@ import json
 from typing import Dict, Any, List
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
-from ..schemas.state import NGEState, character_state
+from ..schemas.state import NGEState, CharacterState
 from ..config import Config
-from ..utils import strip_think_tags, extract_json_from_text, validate_character_consistency
+from ..utils import strip_think_tags, extract_json_from_text, validate_character_consistency, normalize_llm_content
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,11 +18,20 @@ class ReviewerAgent:
     遵循 Rule 1.1 / 2.2: 逻辑与一致性守门人
     """
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(
-            model=Config.model.GEMINI_MODEL,
-            google_api_key=Config.model.GEMINI_API_KEY,
-            temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
-        )
+        if Config.model.GEMINI_MODEL == "mock":
+            from ..utils import MockChatModel
+            self.llm = MockChatModel(responses=[
+                # Response for review_draft
+                json.dumps({"passed": True, "score": 0.9, "feedback": "Good job", "logical_errors": []}),
+                # Response for evolve_characters (if called, but EvolverAgent seems to be used instead in graph)
+                json.dumps({"new_mood": "Happy", "evolution_summary": "Evolved", "new_skills": [], "asset_changes": {}, "acquired_items": [], "lost_items": [], "relationship_changes": [], "summary": "Ch summary"})
+            ])
+        else:
+            self.llm = ChatGoogleGenerativeAI(
+                model=Config.model.GEMINI_MODEL,
+                google_api_key=Config.model.GEMINI_API_KEY,
+                temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
+            )
 
     async def review_draft(self, state: NGEState, draft: str) -> Dict[str, Any]:
         """
@@ -64,7 +73,8 @@ class ReviewerAgent:
         )
         response = await self.llm.ainvoke(messages)
         
-        content_str = strip_think_tags(response.content)
+        content_str = normalize_llm_content(response.content)
+        content_str = strip_think_tags(content_str)
         result = extract_json_from_text(content_str)
         
         if not result:
@@ -122,5 +132,6 @@ class ReviewerAgent:
         )
         response = await self.llm.ainvoke(messages)
         
-        content_str = strip_think_tags(response.content)
+        content_str = normalize_llm_content(response.content)
+        content_str = strip_think_tags(content_str)
         return extract_json_from_text(content_str) or {}

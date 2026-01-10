@@ -10,7 +10,7 @@ from .db.base import SessionLocal
 from .db.models import Novel, NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter, WorldItem, CharacterBranchStatus
 from .db.vector_store import VectorStore
 from .monitoring import monitor
-from .utils import strip_think_tags
+from .utils import strip_think_tags, normalize_llm_content
 import json
 from datetime import datetime
 
@@ -445,7 +445,8 @@ class NGEGraph:
         
         # 这里直接调用 reviewer 的 llm (Gemini)
         response = await self.reviewer.llm.ainvoke(prompt)
-        fixed_draft = strip_think_tags(response.content)
+        fixed_draft = normalize_llm_content(response.content)
+        fixed_draft = strip_think_tags(fixed_draft)
         
         return {
             "current_draft": fixed_draft,

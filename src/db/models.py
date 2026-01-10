@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, JSON, ForeignKey, DateTime, Float, Boolean, Index
+from sqlalchemy import Column, Integer, String, Text, JSON, ForeignKey, DateTime, Float, Boolean, Index, ARRAY
 from sqlalchemy.orm import relationship
-from pgvector.sqlalchemy import Vector
+# from pgvector.sqlalchemy import Vector
 from .base import Base
 import datetime
 
@@ -28,7 +28,7 @@ class StyleRef(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768)) # 使用 pgvector 存储 768 维向量
+    embedding = Column(ARRAY(Float)) # Fallback to ARRAY(Float) if pgvector is not available
     source_author = Column(String(255))
     style_metadata = Column(JSON) # 存储句式统计、修辞分布等特征
     
@@ -42,7 +42,7 @@ class ReferenceMaterial(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), index=True) # 标题/书名/条目名
     content = Column(Text, nullable=False)  # 内容片段
-    embedding = Column(Vector(768))         # 向量
+    embedding = Column(ARRAY(Float))         # 向量
     source = Column(String(255))            # 来源（作者/书名）
     category = Column(String(100), index=True) # 分类：world_setting(世界观), plot_trope(剧情), character_archetype(人物原型), style(文风)
     tags = Column(JSON)                     # 标签列表
@@ -58,7 +58,7 @@ class NovelBible(Base):
     category = Column(String(100), index=True) 
     key = Column(String(255), index=True) # 去掉 unique=True，因为不同小说可能有相同的 key
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768)) # 使用 pgvector 存储 768 维向量
+    embedding = Column(ARRAY(Float)) # Fallback to ARRAY(Float)
     importance = Column(Integer, default=5)
     tags = Column(JSON)
     
@@ -149,6 +149,7 @@ class PlotOutline(Base):
     novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
     branch_id = Column(String(100), default="main", index=True) # 分支 ID
     chapter_number = Column(Integer, index=True)
+    title = Column(String(255))      # 章节标题
     scene_description = Column(Text) # 核心场面描写
     key_conflict = Column(Text)      # 核心冲突点
     foreshadowing = Column(JSON)      # 本章埋下的伏笔

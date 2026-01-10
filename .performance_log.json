@@ -1,0 +1,45 @@
+{
+  "sessions": [
+    {
+      "chapter": 1,
+      "start_time": "2026-01-08T11:24:56.973987",
+      "agents": {},
+      "total_time": 107511.995538,
+      "retry_count": 0,
+      "success": false,
+      "end_time": "2026-01-09T17:16:48.969525"
+    },
+    {
+      "chapter": 1,
+      "start_time": "2026-01-08T11:29:10.986412",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    },
+    {
+      "chapter": 1,
+      "start_time": "2026-01-08T11:38:44.068132",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    },
+    {
+      "chapter": 1,
+      "start_time": "2026-01-08T11:51:37.507988",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    },
+    {
+      "chapter": 1,
+      "start_time": "2026-01-09T17:14:48.763611",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 from ..schemas.state import NGEState, CharacterState
 from ..llms import get_llm
+from ..utils import normalize_llm_content, extract_json_from_text
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 
@@ -59,5 +60,11 @@ class CharacterEvolver:
         }}
         """
         
-        response = await self.llm.ainvoke(prompt, response_format="json")
-        return EvolutionResult.model_validate_json(response)
+        response = await self.llm.ainvoke(prompt)
+        content = normalize_llm_content(response.content)
+        json_data = extract_json_from_text(content)
+        if not json_data:
+            # Return empty result if parsing fails
+            return EvolutionResult(evolutions=[])
+            
+        return EvolutionResult.model_validate(json_data)

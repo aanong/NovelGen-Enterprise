@@ -67,11 +67,23 @@ class LearnerAgent:
     """
     def __init__(self):
         from ..config import Config
-        self.llm = ChatGoogleGenerativeAI(
-            model=Config.model.GEMINI_MODEL,
-            google_api_key=Config.model.GEMINI_API_KEY,
-            temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
-        )
+        if Config.model.GEMINI_MODEL == "mock":
+            from ..utils import MockChatModel
+            self.llm = MockChatModel(responses=[
+                json.dumps({
+                    "world_view_items": [{"category": "World", "key": "System", "content": "Magic"}], 
+                    "characters": [{"name": "MockChar", "role": "Protagonist", "personality": "Brave", "background": "None", "relationship_summary": "None", "skills": [], "assets": {}}], 
+                    "items": [], 
+                    "outlines": [{"chapter_number": 1, "title": "Ch1", "scene_description": "Scene 1", "key_conflict": "Conflict 1", "instruction": "Write Ch1"}], 
+                    "style": {"tone": "Mock", "rhetoric": [], "keywords": [], "example_sentence": "Mock"}
+                })
+            ])
+        else:
+            self.llm = ChatGoogleGenerativeAI(
+                model=Config.model.GEMINI_MODEL,
+                google_api_key=Config.model.GEMINI_API_KEY,
+                temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
+            )
         self.parser = PydanticOutputParser(pydantic_object=NovelSetupData)
         self.db: Session = SessionLocal()
 
@@ -121,9 +133,23 @@ class LearnerAgent:
         prompt_value = prompt.format_prompt(**input_data)
         response = await self.llm.ainvoke(prompt_value.to_messages())
         content_str = response.content
+        if isinstance(content_str, list):
+            # Handle case where content is a list of parts
+            parts = []
+            for part in content_str:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif isinstance(part, dict) and "text" in part:
+                    parts.append(part["text"])
+                elif hasattr(part, "text"):
+                    parts.append(part.text)
+                else:
+                    parts.append(str(part))
+            content_str = "".join(parts)
         
         # Rule 4.1: Strip <think> tags using utility
         content_str = strip_think_tags(content_str)
+        print(f"DEBUG: Learner Raw Content: {content_str[:500]}...") # Debug print
         
         try:
             # Try standard parsing first

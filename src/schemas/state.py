@@ -62,6 +62,7 @@ class NGEState(BaseModel):
     plot_progress: List[PlotPoint]
     current_plot_index: int = 0
     current_branch: str = Field(default="main", description="当前剧情分支 ID")
+    current_novel_id: int = Field(description="当前小说 ID")
     last_chapter_id: Optional[int] = Field(None, description="上一章的数据库 ID，用于构建链表")
     branch_options: Optional[List[Dict[str, Any]]] = Field(None, description="当前节点的可选分支走向")
     memory_context: MemoryContext
