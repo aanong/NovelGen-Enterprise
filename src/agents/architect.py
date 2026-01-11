@@ -199,13 +199,21 @@ class ArchitectAgent:
             current_point = state.plot_progress[state.current_plot_index]
             current_point_info = f"标题：{current_point.title}\n描述：{current_point.description}\n关键事件：{', '.join(current_point.key_events)}"
 
-        last_summary = state.memory_context.recent_summaries[-1] if state.memory_context.recent_summaries else "开篇第一章"
+        if state.memory_context.recent_summaries:
+            # 使用所有最近的摘要，构建更完整的上下文
+            last_summary = "\n".join([f"- {s}" for s in state.memory_context.recent_summaries])
+        else:
+            last_summary = "开篇第一章"
         
         char_info = "\n".join([
             f"- {n}: 技能={', '.join(c.skills)}, 资产={json.dumps(c.assets, ensure_ascii=False)}, 物品={', '.join([i.name for i in c.inventory])}"
             for n, c in state.characters.items()
         ])
         
+        # 获取全局伏笔
+        active_threads = state.memory_context.global_foreshadowing
+        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个剧情规划专家。任务是为即将撰写的章节制定详细的微型提纲。\n"
@@ -218,8 +226,9 @@ class ArchitectAgent:
             ("human", (
                 "当前活跃角色状态：\n{char_info}\n\n"
                 "当前剧情点：\n{current_point_info}\n\n"
+                "【未回收伏笔/悬念】：\n{threads_str}\n\n"
                 "上一章总结：{last_summary}\n\n"
-                "请规划下一章详情。"
+                "请规划下一章详情。如果合适，请尝试推进或回收上述伏笔。"
             ))
         ])
         
@@ -227,6 +236,7 @@ class ArchitectAgent:
             "char_info": char_info,
             "current_point_info": current_point_info,
             "last_summary": last_summary,
+            "threads_str": threads_str,
             "format_instructions": self.plan_parser.get_format_instructions()
         }
         

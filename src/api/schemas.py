@@ -47,3 +47,34 @@ class OutlineResponse(OutlineBase):
     
     class Config:
         orm_mode = True
+
+class RelationshipResponse(BaseModel):
+    id: int
+    char_a_id: int
+    char_b_id: int
+    relation_type: str
+    intimacy: float
+    
+    class Config:
+        orm_mode = True
+
+class WorldItemResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    rarity: Optional[str]
+    powers: Optional[Any]
+    location: Optional[str]
+    
+    class Config:
+        orm_mode = True
+
+class NovelBibleResponse(BaseModel):
+    id: int
+    category: str
+    key: str
+    content: str
+    importance: int
+    
+    class Config:
+        orm_mode = True

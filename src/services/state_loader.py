@@ -3,7 +3,9 @@ from src.schemas.style import StyleFeatures
 from src.db.base import SessionLocal
 from src.db.models import Novel, NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle, WorldItem as DBWorldItem
 
-async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState | None:
+from typing import Optional
+
+async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional[NGEState]:
     """从数据库加载指定小说的初始状态"""
     db = SessionLocal()
     try:
@@ -82,6 +84,26 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
         style_refs = db.query(DBStyle).filter(DBStyle.novel_id == novel_id).limit(5).all()
         example_sentences = [s.content for s in style_refs] # 注意：models.py 中是 content 不是 source_text
 
+        # Load global foreshadowing from persistent storage (NovelBible)
+        sys_bible = db.query(DBBible).filter(
+            DBBible.novel_id == novel_id,
+            DBBible.category == "system_state",
+            DBBible.key == "global_foreshadowing"
+        ).first()
+        
+        saved_foreshadowing = []
+        if sys_bible:
+            import json
+            try:
+                # Content stored as JSON string inside Text column
+                saved_foreshadowing = json.loads(sys_bible.content)
+            except:
+                saved_foreshadowing = []
+
+        combined_summary = ["故事开篇"]
+        # Rule 3.1: Load recent summaries explicitly if not relying only on graph node
+        # (Though graph.load_context_node does this, loading it here helps initial state validity)
+        
         initial_state = NGEState(
             novel_bible=NovelBible(
                 world_view=bible_content,
@@ -101,8 +123,8 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
             plot_progress=plot_progress,
             current_plot_index=current_plot_index,
             memory_context=MemoryContext(
-                recent_summaries=["故事开篇"],
-                global_foreshadowing=[]
+                recent_summaries=combined_summary,
+                global_foreshadowing=saved_foreshadowing
             ),
             current_branch=branch_id,
             current_novel_id=novel_id

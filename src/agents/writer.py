@@ -102,7 +102,11 @@ class WriterAgent:
         if state.refined_context:
             refined_context_str = "\n【相关背景与细节设定】\n" + "\n".join(state.refined_context) + "\n"
 
-        history_summary = ' | '.join(state.memory_context.recent_summaries[-3:])
+        # 提取全局伏笔
+        active_threads = state.memory_context.global_foreshadowing
+        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
+
+        history_summary = '\n'.join(state.memory_context.recent_summaries)
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
@@ -114,11 +118,14 @@ class WriterAgent:
                 "{refined_context_str}"
                 "历史背景摘要：\n"
                 "{history_summary}\n"
+                "【未解决伏笔/悬念】：\n"
+                "{threads_str}\n"
                 "\n【核心执行准则】\n"
                 "- Rule 6.2: 在回复的开头必须以“当前遵循：[场景准则]”作为验证（如：当前遵循：Action 场景，短促动词，禁用长句）。\n"
                 "- 绝对禁止让角色做出其【禁止行为】中的动作。\n"
                 "- 绝对遵守场景强制约束，这是文风的一致性保证。\n"
                 "- 保持角色心境与当前状态一致。\n"
+                "- 此前埋下的伏笔若有机会，请自然地推进或回收。\n"
             )),
             ("human", (
                 "当前剧情：{current_point_title}\n"
@@ -134,6 +141,7 @@ class WriterAgent:
             scene_rules=scene_rules,
             refined_context_str=refined_context_str,
             history_summary=history_summary,
+            threads_str=threads_str,
             current_point_title=current_point_title,
             current_point_desc=current_point_desc,
             plan_instruction=plan_instruction

@@ -1,164 +1,412 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NovelGen Dashboard</title>
+    <title>NovelGen Enterprise - Command Center</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .vis-network {
+            outline: none;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+    </style>
 </head>
-<body class="bg-gray-100">
-    <div id="app" class="container mx-auto px-4 py-8">
-        <header class="mb-8 flex justify-between items-center">
-            <div>
-                <h1 class="text-3xl font-bold text-gray-800">NovelGen Enterprise</h1>
-                <p class="text-gray-600">AI 小说生成控制台</p>
+
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden">
+    <div id="app" class="flex flex-col h-full">
+        <!-- Header -->
+        <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm z-10">
+            <div class="flex items-center gap-4">
+                <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">N
+                </div>
+                <h1
+                    class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
+                    NovelGen Enterprise</h1>
             </div>
+
             <div class="flex gap-4 items-center">
-                <select v-model="selectedNovelId" @change="fetchData" class="border rounded px-3 py-2 bg-white">
-                    <option v-for="novel in novels" :key="novel.id" :value="novel.id">
-                        {{ novel.title }}
-                    </option>
-                </select>
-                <button @click="fetchData" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
-                    刷新数据
+                <!-- Novel Selector -->
+                <div class="relative group">
+                    <select v-model="selectedNovelId" @change="fetchData"
+                        class="appearance-none bg-slate-100 border-none rounded-lg py-2 pl-4 pr-10 text-sm font-medium focus:ring-2 focus:ring-blue-500 cursor-pointer hover:bg-slate-200 transition-colors">
+                        <option v-for="novel in novels" :key="novel.id" :value="novel.id">
+                            {{ novel.title }}
+                        </option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                        <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                            <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Branch Selector -->
+                <div class="relative group flex items-center gap-2">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Branch</span>
+                    <input v-model="currentBranch" @change="fetchData" type="text"
+                        class="bg-slate-100 border-none rounded-lg py-2 px-3 text-sm font-medium w-32 focus:ring-2 focus:ring-purple-500"
+                        placeholder="main">
+                </div>
+
+                <div class="w-px h-6 bg-gray-300 mx-2"></div>
+
+                <button @click="exportNovel" :disabled="!selectedNovelId" title="Export Novel"
+                    class="text-gray-500 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-slate-100 disabled:opacity-50">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
                 </button>
-                <button @click="triggerGeneration" :disabled="isGenerating || !selectedNovelId" 
-                    class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">
-                    {{ isGenerating ? '生成中...' : '生成下一章' }}
+
+                <button @click="fetchData"
+                    class="text-gray-500 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-slate-100">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                </button>
+
+                <button @click="triggerGeneration" :disabled="isGenerating || !selectedNovelId"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:shadow-none flex items-center gap-2">
+                    <span v-if="isGenerating" class="animate-spin">⟳</span>
+                    {{ isGenerating ? 'Generating...' : 'Generate New Chapter' }}
                 </button>
             </div>
         </header>
 
-        <!-- 实时生成监控 -->
-        <div v-if="isGenerating || streamingContent" class="mb-8 bg-white rounded-lg shadow-lg border-l-4 border-blue-500 overflow-hidden">
-            <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
-                <div>
-                    <h3 class="font-bold text-lg text-gray-800">🚀 正在生成中...</h3>
-                    <p class="text-sm text-gray-600">当前阶段: <span class="font-mono bg-blue-100 text-blue-800 px-2 py-0.5 rounded">{{ currentStep }}</span></p>
-                </div>
-                <div class="animate-pulse flex space-x-2">
-                    <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    <div class="w-2 h-2 bg-blue-500 rounded-full animation-delay-200"></div>
-                    <div class="w-2 h-2 bg-blue-500 rounded-full animation-delay-400"></div>
-                </div>
-            </div>
-            <div class="p-6 max-h-96 overflow-y-auto font-serif text-lg leading-relaxed whitespace-pre-wrap bg-gray-50">
-                {{ streamingContent }}<span class="animate-pulse">|</span>
-            </div>
-        </div>
+        <!-- Main Workspace -->
+        <div class="flex-1 flex overflow-hidden">
+            <!-- Sidebar Navigation -->
+            <nav class="w-64 bg-white border-r border-gray-200 flex flex-col p-4 gap-2">
+                <button v-for="tab in tabs" :key="tab.id" @click="currentTab = tab.id"
+                    :class="['flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200', 
+                             currentTab === tab.id ? 'bg-blue-50 text-blue-700 shadow-sm' : 'text-gray-600 hover:bg-slate-50 hover:text-gray-900']">
+                    <span class="text-xl">{{ tab.icon }}</span>
+                    {{ tab.name }}
+                </button>
 
-        <!-- 状态概览 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">已生成章节</h3>
-                <p class="text-4xl font-bold text-blue-600">{{ chapters.length }}</p>
-            </div>
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">登场角色</h3>
-                <p class="text-4xl font-bold text-purple-600">{{ characters.length }}</p>
-            </div>
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">大纲进度</h3>
-                <p class="text-4xl font-bold text-green-600">{{ outlines.length }}</p>
-            </div>
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">资料库</h3>
-                <p class="text-4xl font-bold text-orange-600">{{ referenceCount || '-' }}</p>
-                <p class="text-xs text-gray-500 mt-1">条目数量</p>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- 章节列表 -->
-            <div class="lg:col-span-2">
-                <h2 class="text-xl font-bold mb-4">章节列表</h2>
-                <div class="bg-white rounded-lg shadow overflow-hidden">
-                    <div v-for="chapter in chapters" :key="chapter.id" class="border-b last:border-0 p-4 hover:bg-gray-50">
-                        <div class="flex justify-between items-center mb-2">
-                            <h3 class="font-bold text-lg">第 {{ chapter.chapter_number }} 章: {{ chapter.title || '无标题' }}</h3>
-                            <span class="text-sm text-gray-500">{{ formatDate(chapter.created_at) }}</span>
+                <div class="mt-auto pt-4 border-t border-gray-100">
+                    <div class="bg-slate-50 rounded-lg p-3">
+                        <p class="text-xs font-bold text-gray-400 uppercase mb-2">Generation Status</p>
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-xs font-semibold text-gray-700">{{ currentStep }}</span>
+                            <span
+                                :class="['w-2 h-2 rounded-full', isGenerating ? 'bg-green-500 animate-pulse' : 'bg-gray-300']"></span>
                         </div>
-                        <p class="text-gray-600 line-clamp-3">{{ chapter.summary || '暂无摘要' }}</p>
-                        <button @click="viewChapter(chapter)" class="mt-2 text-blue-500 hover:text-blue-700 text-sm">
-                            阅读全文
-                        </button>
-                    </div>
-                    <div v-if="chapters.length === 0" class="p-8 text-center text-gray-500">
-                        暂无章节，请点击右上角生成。
+                        <div v-if="streamingContent"
+                            class="mt-2 text-[10px] text-gray-500 font-mono leading-tight max-h-20 overflow-hidden relative">
+                            {{ streamingContent.slice(-100) }}...
+                            <div class="absolute inset-0 bg-gradient-to-t from-slate-50 to-transparent"></div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </nav>
 
-            <!-- 侧边栏 -->
-            <div class="space-y-8">
-                <!-- 角色列表 -->
-                <div>
-                    <h2 class="text-xl font-bold mb-4">活跃角色</h2>
-                    <div class="bg-white rounded-lg shadow p-4">
-                        <div v-for="char in characters" :key="char.id" class="mb-4 last:mb-0 border-b last:border-0 pb-2">
-                            <div class="flex justify-between">
-                                <span class="font-bold">{{ char.name }}</span>
-                                <span class="text-xs bg-gray-200 px-2 py-1 rounded">{{ char.role || '配角' }}</span>
+            <!-- Content Area -->
+            <main class="flex-1 overflow-y-auto bg-slate-50 p-8 relative">
+
+                <!-- Tab: Overview -->
+                <div v-if="currentTab === 'dashboard'" class="space-y-8 max-w-6xl mx-auto">
+                    <!-- Metrics Row -->
+                    <div class="grid grid-cols-4 gap-6">
+                        <div v-for="stat in stats" class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{{ stat.label }}
+                            </p>
+                            <div class="flex items-end justify-between">
+                                <span class="text-3xl font-bold text-gray-800">{{ stat.value }}</span>
+                                <span :class="['text-xs font-medium px-2 py-1 rounded-full', stat.color]">{{ stat.trend
+                                    }}</span>
                             </div>
-                            <p class="text-sm text-gray-600 mt-1">心情: {{ char.current_mood || '未知' }}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-8">
+                        <!-- Recent Chapters -->
+                        <div
+                            class="col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-[600px]">
+                            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                                <h3 class="font-bold text-gray-800">Story Progression</h3>
+                                <span class="text-xs text-gray-400">Time-ordered</span>
+                            </div>
+                            <div class="overflow-y-auto flex-1 p-2">
+                                <div v-for="chapter in chapters" :key="chapter.id"
+                                    class="p-4 hover:bg-slate-50 rounded-xl cursor-group transition-colors group">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <div>
+                                            <span
+                                                class="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded mr-2">Ch.
+                                                {{ chapter.chapter_number }}</span>
+                                            <span
+                                                class="font-bold text-gray-800 group-hover:text-blue-600 transition-colors">{{
+                                                chapter.title || 'Untitled' }}</span>
+                                        </div>
+                                        <span class="text-xs text-gray-400 font-mono">{{ formatDate(chapter.created_at)
+                                            }}</span>
+                                    </div>
+                                    <p class="text-sm text-gray-500 line-clamp-2 leading-relaxed">{{ chapter.summary ||
+                                        'No summary available.' }}</p>
+
+                                    <div class="mt-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button @click="viewChapter(chapter)"
+                                            class="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1 rounded-md hover:border-blue-500 hover:text-blue-600">Read</button>
+                                        <button
+                                            class="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1 rounded-md hover:border-purple-500 hover:text-purple-600">Audit
+                                            Log</button>
+                                    </div>
+                                </div>
+                                <div v-if="chapters.length === 0"
+                                    class="h-full flex items-center justify-center text-gray-400 flex-col gap-2">
+                                    <span class="text-4xl">📭</span>
+                                    <p>No chapters yet</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Outline / Future -->
+                        <div
+                            class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-[600px]">
+                            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                                <h3 class="font-bold text-gray-800">Next Up</h3>
+                            </div>
+                            <div class="p-4 space-y-4 overflow-y-auto flex-1">
+                                <div v-for="outline in pendingOutlines" :key="outline.id"
+                                    class="relative pl-6 pb-2 border-l-2 border-blue-100 last:border-0 ml-2">
+                                    <div
+                                        class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-blue-500 ring-4 ring-white">
+                                    </div>
+                                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 ml-2">
+                                        <p class="text-xs font-bold text-blue-600 mb-1">Chapter {{
+                                            outline.chapter_number }}</p>
+                                        <p class="text-sm text-gray-700 font-medium mb-1">{{ outline.scene_description
+                                            }}</p>
+                                        <p class="text-xs text-slate-500">{{ outline.key_conflict }}</p>
+                                    </div>
+                                </div>
+                                <div v-if="pendingOutlines.length === 0" class="text-center p-8 text-sm text-gray-400">
+                                    All outlines completed.
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 大纲预览 -->
-                <div>
-                    <h2 class="text-xl font-bold mb-4">后续大纲</h2>
-                    <div class="bg-white rounded-lg shadow p-4">
-                        <div v-for="outline in pendingOutlines" :key="outline.id" class="mb-3 text-sm">
-                            <span class="font-bold text-gray-700">第 {{ outline.chapter_number }} 章:</span>
-                            <span class="text-gray-600 ml-2">{{ outline.scene_description?.substring(0, 50) }}...</span>
+                <!-- Tab: Knowledge Graph -->
+                <div v-show="currentTab === 'graph'"
+                    class="h-full flex flex-col rounded-2xl overflow-hidden shadow-sm border border-gray-200 bg-white">
+                    <div class="flex-1 flex">
+                        <!-- Left: Character List -->
+                        <div class="w-80 border-r border-gray-200 overflow-y-auto p-4 bg-gray-50">
+                            <h3 class="font-bold text-gray-800 mb-4 px-2">Characters ({{ characters.length }})</h3>
+                            <div class="space-y-3">
+                                <div v-for="char in characters" :key="char.id"
+                                    class="bg-white p-3 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+                                    <div class="flex justify-between items-start">
+                                        <div class="font-bold text-gray-800">{{ char.name }}</div>
+                                        <span
+                                            class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{{
+                                            char.role }}</span>
+                                    </div>
+                                    <div class="mt-2 text-xs space-y-1 text-gray-500">
+                                        <div class="flex gap-1 justify-between"><span>Mood:</span> <span
+                                                class="font-medium text-gray-700">{{ char.current_mood }}</span></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
+
+                        <!-- Right: Vis.js Network -->
+                        <div class="flex-1 relative bg-slate-50">
+                            <div id="relationship-network" class="absolute inset-0"></div>
+                            <div
+                                class="absolute top-4 right-4 bg-white/90 backdrop-blur p-3 rounded-lg shadow text-xs text-gray-600 space-y-1 z-10">
+                                <div class="flex items-center gap-2"><span
+                                        class="w-2 h-2 rounded-full bg-blue-500"></span> Ally</div>
+                                <div class="flex items-center gap-2"><span
+                                        class="w-2 h-2 rounded-full bg-red-500"></span> Hostile</div>
+                                <div class="flex items-center gap-2"><span
+                                        class="w-2 h-2 rounded-full bg-gray-400"></span> Neutral</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: World Building -->
+                <div v-if="currentTab === 'world'" class="max-w-6xl mx-auto space-y-8">
+                    <!-- Items -->
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <span>📦</span> World Items
+                        </h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div v-for="item in worldItems" :key="item.id"
+                                class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:border-blue-300 transition-colors">
+                                <div class="flex justify-between items-start mb-3">
+                                    <h3 class="font-bold text-gray-800">{{ item.name }}</h3>
+                                    <span
+                                        :class="['text-xs px-2 py-1 rounded-full border', getRarityClass(item.rarity)]">{{
+                                        item.rarity }}</span>
+                                </div>
+                                <p class="text-sm text-gray-600 mb-3">{{ item.description }}</p>
+                                <div
+                                    class="flex justify-between items-center text-xs text-gray-400 font-mono pt-3 border-t border-gray-50">
+                                    <span>Loc: {{ item.location || 'Unknown' }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bible Entries -->
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <span>📜</span> Codex / Bible
+                        </h2>
+                        <div
+                            class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden divide-y divide-gray-100">
+                            <div v-for="entry in bibleEntries" :key="entry.id" class="group">
+                                <div class="p-4 cursor-pointer hover:bg-slate-50 flex justify-between items-center">
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-xs font-bold uppercase text-gray-400 w-16 text-right">{{
+                                            entry.category }}</span>
+                                        <span class="font-bold text-gray-800">{{ entry.key }}</span>
+                                    </div>
+                                    <span class="text-xs text-gray-400 group-hover:text-gray-600">Imp: {{
+                                        entry.importance }}</span>
+                                </div>
+                                <div
+                                    class="px-4 pb-4 ml-16 text-sm text-gray-600 hidden group-hover:block animate-fade-in">
+                                    {{ entry.content }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Foreshadowing Tracker (New Feature) -->
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <span>🧶</span> Narrative Threads (Foreshadowing)
+                        </h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Active Threads -->
+                            <div
+                                class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                                <div class="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
+                                <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> Active Threads
+                                </h3>
+                                <div v-if="activeThreads.length > 0" class="space-y-3">
+                                    <div v-for="(thread, idx) in activeThreads" :key="idx"
+                                        class="bg-amber-50 p-3 rounded-lg border border-amber-100 text-sm text-gray-700">
+                                        {{ thread }}
+                                    </div>
+                                </div>
+                                <div v-else class="text-sm text-gray-400 italic">No active foreshadowing detected.</div>
+                            </div>
+
+                            <!-- Resolved Threads (Placeholder for now, or we can track history) -->
+                            <div
+                                class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden opacity-75">
+                                <div class="absolute top-0 left-0 w-1 h-full bg-green-400"></div>
+                                <h3 class="font-bold text-gray-800 mb-3 text-gray-500">Resolved Arcs</h3>
+                                <div class="text-sm text-gray-400 italic">
+                                    Resolved threads are currently archived in chapter logs.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+            </main>
+        </div>
+
+        <!-- Chapter Reader Modal -->
+        <div v-if="selectedChapter" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="selectedChapter = null"></div>
+            <div
+                class="bg-white w-full max-w-3xl h-[85vh] rounded-2xl shadow-2xl z-10 flex flex-col overflow-hidden animate-scale-up">
+                <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-white">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">Chapter {{ selectedChapter.chapter_number }}</h2>
+                        <p class="text-gray-500 text-sm">{{ selectedChapter.title }}</p>
+                    </div>
+                    <button @click="selectedChapter = null"
+                        class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-gray-600">
+                        &times;
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-10 bg-[#faf9f6]">
+                    <div
+                        class="prose prose-slate max-w-none text-lg leading-loose font-serif text-gray-800 whitespace-pre-wrap">
+                        {{ selectedChapter.content }}
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 章节阅读模态框 -->
-        <div v-if="selectedChapter" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-                <div class="p-4 border-b flex justify-between items-center">
-                    <h2 class="text-xl font-bold">第 {{ selectedChapter.chapter_number }} 章: {{ selectedChapter.title }}</h2>
-                    <button @click="selectedChapter = null" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-                </div>
-                <div class="p-6 overflow-y-auto prose max-w-none">
-                    <div class="whitespace-pre-wrap">{{ selectedChapter.content }}</div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <script>
-        const { createApp, ref, onMounted, computed } = Vue;
+        const { createApp, ref, onMounted, computed, watch, nextTick } = Vue;
 
         createApp({
             setup() {
+                // Core Data
                 const novels = ref([]);
                 const selectedNovelId = ref(null);
+                const currentBranch = ref('main');
+
+                // Entity Data
                 const chapters = ref([]);
                 const characters = ref([]);
                 const outlines = ref([]);
+                const relationships = ref([]);
+                const worldItems = ref([]);
+                const bibleEntries = ref([]);
+
+                // UI State
+                const currentTab = ref('dashboard');
                 const isGenerating = ref(false);
                 const selectedChapter = ref(null);
-                
-                // 新增状态
                 const streamingContent = ref('');
                 const currentStep = ref('Ready');
-                const referenceCount = ref(0); // 暂无 API，预留
+
+                // Visual configs
+                const tabs = [
+                    { id: 'dashboard', name: 'Dashboard', icon: '📊' },
+                    { id: 'graph', name: 'Relations Map', icon: '🕸️' },
+                    { id: 'world', name: 'World Building', icon: '🌍' },
+                ];
+
+                const stats = computed(() => {
+                    return [
+                        { label: 'Total Chapters', value: chapters.value.length, trend: 'Latest', color: 'bg-blue-100 text-blue-700' },
+                        { label: 'Active Characters', value: characters.value.length, trend: 'Tracked', color: 'bg-purple-100 text-purple-700' },
+                        { label: 'World Items', value: worldItems.value.length, trend: 'Found', color: 'bg-amber-100 text-amber-700' },
+                        { label: 'Lore Entries', value: bibleEntries.value.length, trend: 'Indexed', color: 'bg-green-100 text-green-700' },
+                    ]
+                });
 
                 const pendingOutlines = computed(() => {
-                    const lastChapterNum = chapters.value.length > 0 
-                        ? Math.max(...chapters.value.map(c => c.chapter_number)) 
+                    const lastChapterNum = chapters.value.length > 0
+                        ? Math.max(...chapters.value.map(c => c.chapter_number))
                         : 0;
                     return outlines.value.filter(o => o.chapter_number > lastChapterNum).slice(0, 5);
                 });
 
+                // API Calls
                 const fetchNovels = async () => {
                     try {
                         const res = await axios.get('/api/novels/');
@@ -167,150 +415,164 @@
                             selectedNovelId.value = novels.value[0].id;
                             fetchData();
                         }
-                    } catch (error) {
-                        console.error('Error fetching novels:', error);
-                    }
+                    } catch (e) { console.error(e); }
                 };
 
                 const fetchData = async () => {
                     if (!selectedNovelId.value) return;
-                    
                     try {
-                        // 并行获取数据
-                        const [chaptersRes, charsRes, outlinesRes] = await Promise.all([
-                            axios.get(`/api/chapters/?novel_id=${selectedNovelId.value}`),
-                            axios.get(`/api/characters/?novel_id=${selectedNovelId.value}`),
-                            axios.get(`/api/outlines/?novel_id=${selectedNovelId.value}`)
+                        const [chapRes, charRes, outRes, relRes, worldRes, bibleRes] = await Promise.all([
+                            axios.get(`/api/chapters/?novel_id=${selectedNovelId.value}&branch_id=${currentBranch.value}`),
+                            axios.get(`/api/characters/?novel_id=${selectedNovelId.value}`), // Characters are global for now, but state might be branched
+                            axios.get(`/api/outlines/?novel_id=${selectedNovelId.value}&branch_id=${currentBranch.value}`),
+                            axios.get(`/api/relationships/?novel_id=${selectedNovelId.value}`),
+                            axios.get(`/api/world/items?novel_id=${selectedNovelId.value}`),
+                            axios.get(`/api/world/bible?novel_id=${selectedNovelId.value}`)
                         ]);
-                        
-                        chapters.value = chaptersRes.data;
-                        characters.value = charsRes.data;
-                        outlines.value = outlinesRes.data;
-                        
-                        // 检查是否有正在进行的任务（可选，如果后端支持查询当前任务状态）
-                        // 目前主要依赖 SSE 保持状态
-                    } catch (error) {
-                        console.error('Error fetching data:', error);
+
+                        chapters.value = chapRes.data.sort((a, b) => b.chapter_number - a.chapter_number);
+                        characters.value = charRes.data;
+                        outlines.value = outRes.data;
+                        relationships.value = relRes.data;
+                        worldItems.value = worldRes.data;
+                        worldItems.value = worldRes.data;
+
+                        // Separating system state from normal bible entries
+                        const allBible = bibleRes.data;
+                        bibleEntries.value = allBible.filter(b => b.category !== 'system_state');
+
+                        // Parse global foreshadowing
+                        const sysState = allBible.find(b => b.category === 'system_state' && b.key === 'global_foreshadowing');
+                        if (sysState) {
+                            try {
+                                activeThreads.value = JSON.parse(sysState.content);
+                            } catch { activeThreads.value = []; }
+                        } else {
+                            activeThreads.value = [];
+                        }
+
+                        if (currentTab.value === 'graph') {
+                            renderNetwork();
+                        }
+                    } catch (e) { console.error(e); }
+                };
+
+                // Graph Visualization
+                let network = null;
+                const renderNetwork = () => {
+                    const container = document.getElementById('relationship-network');
+                    if (!container) return;
+
+                    const nodes = characters.value.map(c => ({
+                        id: c.id,
+                        label: c.name,
+                        shape: 'dot',
+                        size: 20,
+                        color: c.role === 'Protagonist' ? '#2563eb' : '#64748b' // Blue for protagonist, gray else
+                    }));
+
+                    const edges = relationships.value.map(r => ({
+                        from: r.char_a_id,
+                        to: r.char_b_id,
+                        color: r.intimacy > 50 ? '#22c55e' : (r.intimacy < -20 ? '#ef4444' : '#9ca3af'),
+                        width: Math.abs(r.intimacy) / 10 + 1
+                    }));
+
+                    const data = { nodes, edges };
+                    const options = {
+                        physics: { stabilization: true },
+                        nodes: { font: { face: 'Inter', color: '#334155' } }
+                    };
+
+                    if (network) {
+                        network.setData(data);
+                    } else {
+                        network = new vis.Network(container, data, options);
                     }
                 };
 
+                watch(currentTab, (val) => {
+                    if (val === 'graph') {
+                        nextTick(() => renderNetwork());
+                    }
+                });
+
+                // Interaction
                 const triggerGeneration = async () => {
                     if (!selectedNovelId.value) return;
-                    
+                    isGenerating.value = true;
+                    streamingContent.value = '';
+                    currentStep.value = 'Initializing...';
+
                     try {
-                        isGenerating.value = true;
-                        streamingContent.value = '';
-                        currentStep.value = 'Initializing...';
-                        
-                        // 1. 触发生成任务
-                        const res = await axios.post('/api/generate/', { 
+                        const res = await axios.post('/api/generate/', {
                             novel_id: selectedNovelId.value,
-                            branch_id: 'main' 
+                            branch_id: currentBranch.value
                         });
-                        
-                        const taskId = res.data.task_id;
-                        console.log(`Task started: ${taskId}`);
-                        
-                        // 2. 建立 SSE 连接
-                        startStream(taskId);
-                        
-                    } catch (error) {
-                        console.error('Error triggering generation:', error);
+                        startStream(res.data.task_id);
+                    } catch (e) {
                         isGenerating.value = false;
-                        currentStep.value = 'Error';
-                        alert('生成启动失败: ' + (error.response?.data?.detail || error.message));
+                        alert('Start Failed: ' + e.message);
                     }
                 };
 
                 const startStream = (taskId) => {
-                    const eventSource = new EventSource(`/api/generate/stream/${taskId}`);
-                    
-                    eventSource.onmessage = (event) => {
-                        // 默认消息处理（如果有）
-                        console.log('SSE Message:', event.data);
-                    };
-
-                    eventSource.addEventListener('token', (event) => {
-                        // 处理生成的文本片段
-                        // 注意：event.data 可能是 JSON 字符串，也可能是纯文本，取决于后端实现
-                        // 假设后端发送的是纯文本 token
+                    const es = new EventSource(`/api/generate/stream/${taskId}`);
+                    es.addEventListener('token', (e) => {
                         try {
-                            // 尝试解析 JSON，如果后端包装了
-                            const data = JSON.parse(event.data);
-                            streamingContent.value += (data.content || data); 
-                        } catch (e) {
-                            // 纯文本
-                            streamingContent.value += event.data;
-                        }
-                        
-                        // 自动滚动到底部
-                        // const container = document.querySelector('.max-h-96');
-                        // if (container) container.scrollTop = container.scrollHeight;
+                            const d = JSON.parse(e.data);
+                            streamingContent.value += (d.content || d);
+                        } catch { streamingContent.value += e.data; }
                     });
-
-                    eventSource.addEventListener('status', (event) => {
-                        // 更新当前步骤状态
-                        currentStep.value = event.data;
-                        console.log('Status update:', event.data);
-                        
-                        if (event.data === 'completed' || event.data === 'failed') {
-                            eventSource.close();
+                    es.addEventListener('status', (e) => {
+                        currentStep.value = e.data;
+                        if (e.data === 'completed' || e.data === 'failed') {
+                            es.close();
                             isGenerating.value = false;
-                            fetchData(); // 刷新数据
-                            if (event.data === 'completed') {
-                                alert('章节生成完成！');
-                            } else {
-                                alert('生成失败，请查看日志。');
-                            }
+                            fetchData();
                         }
                     });
-
-                    eventSource.onerror = (error) => {
-                        console.error('SSE Error:', error);
-                        eventSource.close();
+                    es.onerror = () => {
+                        es.close();
                         isGenerating.value = false;
-                        // 如果连接断开但任务还在跑，可能需要重连逻辑，这里简化处理
                         fetchData();
                     };
                 };
 
-                const viewChapter = async (chapter) => {
-                    try {
-                        const res = await axios.get(`/api/chapters/${chapter.id}`);
-                        selectedChapter.value = res.data;
-                    } catch (error) {
-                        alert('无法加载章节内容');
-                    }
+                const viewChapter = async (c) => {
+                    const res = await axios.get(`/api/chapters/${c.id}`);
+                    selectedChapter.value = res.data;
                 };
 
-                const formatDate = (dateStr) => {
-                    if (!dateStr) return '';
-                    return new Date(dateStr).toLocaleString();
+                const getRarityClass = (r) => {
+                    const map = {
+                        'Common': 'bg-gray-100 text-gray-600 border-gray-200',
+                        'Rare': 'bg-blue-50 text-blue-600 border-blue-200',
+                        'Epic': 'bg-purple-50 text-purple-600 border-purple-200',
+                        'Legendary': 'bg-amber-50 text-amber-600 border-amber-200'
+                    };
+                    return map[r] || map['Common'];
                 };
 
-                onMounted(() => {
-                    fetchNovels();
-                });
+                const formatDate = (s) => new Date(s).toLocaleString();
+
+                const exportNovel = () => {
+                    if (!selectedNovelId.value) return;
+                    const url = `/api/novels/${selectedNovelId.value}/export?branch_id=${currentBranch.value}`;
+                    window.open(url, '_blank');
+                };
+
+                onMounted(() => fetchNovels());
 
                 return {
-                    novels,
-                    selectedNovelId,
-                    chapters,
-                    characters,
-                    outlines,
-                    pendingOutlines,
-                    isGenerating,
-                    selectedChapter,
-                    streamingContent,
-                    currentStep,
-                    referenceCount,
-                    fetchData,
-                    triggerGeneration,
-                    viewChapter,
-                    formatDate
+                    novels, selectedNovelId, currentBranch,
+                    chapters, characters, pendingOutlines, worldItems, bibleEntries, activeThreads,
+                    currentTab, tabs, stats, isGenerating, selectedChapter, streamingContent, currentStep,
+                    fetchData, triggerGeneration, viewChapter, getRarityClass, formatDate, exportNovel
                 };
             }
         }).mount('#app');
     </script>
 </body>
+
 </html>

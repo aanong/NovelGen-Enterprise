@@ -13,25 +13,28 @@
       "chapter": 1,
       "start_time": "2026-01-08T11:29:10.986412",
       "agents": {},
-      "total_time": 0,
-      "retry_count": 0,
-      "success": false
+      "total_time": 239809.785889,
+      "retry_count": 1,
+      "success": true,
+      "end_time": "2026-01-11T06:06:00.772301"
     },
     {
       "chapter": 1,
       "start_time": "2026-01-08T11:38:44.068132",
       "agents": {},
-      "total_time": 0,
-      "retry_count": 0,
-      "success": false
+      "total_time": 239721.941214,
+      "retry_count": 3,
+      "success": true,
+      "end_time": "2026-01-11T06:14:06.009346"
     },
     {
       "chapter": 1,
       "start_time": "2026-01-08T11:51:37.507988",
       "agents": {},
-      "total_time": 0,
-      "retry_count": 0,
-      "success": false
+      "total_time": 239225.899396,
+      "retry_count": 1,
+      "success": true,
+      "end_time": "2026-01-11T06:18:43.407384"
     },
     {
       "chapter": 1,
@@ -68,6 +71,30 @@
     {
       "chapter": 1,
       "start_time": "2026-01-11T05:57:00.186994",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    },
+    {
+      "chapter": 2,
+      "start_time": "2026-01-11T06:02:29.160249",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    },
+    {
+      "chapter": 3,
+      "start_time": "2026-01-11T06:07:34.869283",
+      "agents": {},
+      "total_time": 0,
+      "retry_count": 0,
+      "success": false
+    },
+    {
+      "chapter": 4,
+      "start_time": "2026-01-11T06:15:04.607219",
       "agents": {},
       "total_time": 0,
       "retry_count": 0,

@@ -143,7 +143,7 @@ class NGEGraph:
             
             # 开始回溯
             curr_id = start_chapter_id
-            for _ in range(3): # 回溯 3 章
+            for _ in range(10): # 回溯 10 章, 增加上下文窗口防止剧情漂移
                 if not curr_id:
                     break
                 ch = db.query(DBChapter).filter(DBChapter.id == curr_id).first()
@@ -381,8 +381,55 @@ class NGEGraph:
                     db.add(snapshot)
                 # ---------------------------
 
+            # 处理剧情线更新 (Foreshadowing)
+            if evolution_result.story_updates:
+                updates = evolution_result.story_updates
+                
+                # 1. 添加新伏笔
+                if updates.new_foreshadowing:
+                    for f in updates.new_foreshadowing:
+                        if f not in state.memory_context.global_foreshadowing:
+                            state.memory_context.global_foreshadowing.append(f)
+                            print(f"📖 New Foreshadowing: {f}")
+
+                # 2. 移除已解决伏笔
+                if updates.resolved_threads:
+                    # 使用简单的字符串匹配或包含检查
+                    # 实际生产中可能需要更智能的匹配，这里暂用移除完全匹配或相似项
+                    original_threads = list(state.memory_context.global_foreshadowing)
+                    for resolved in updates.resolved_threads:
+                        # 尝试找到最相似的现有伏笔并移除 (这里简化为包含检测)
+                        # 如果 resolved 是 "关于神秘盒子的秘密"，而列表里有 "神秘盒子"，则认为移除了
+                        for existing in original_threads:
+                            if existing in resolved or resolved in existing:
+                                if existing in state.memory_context.global_foreshadowing:
+                                    state.memory_context.global_foreshadowing.remove(existing)
+                                    print(f"✅ Resolved Thread: {existing}")
+
+                # 持久化全局伏笔到数据库
+                # 使用 NovelBible 存储系统状态 (category='system_state')
+                sys_bible = db.query(NovelBible).filter(
+                    NovelBible.novel_id == state.current_novel_id,
+                    NovelBible.category == "system_state",
+                    NovelBible.key == "global_foreshadowing"
+                ).first()
+
+                new_content = json.dumps(state.memory_context.global_foreshadowing, ensure_ascii=False)
+                
+                if sys_bible:
+                    sys_bible.content = new_content
+                else:
+                    sys_bible = NovelBible(
+                        novel_id=state.current_novel_id,
+                        category="system_state",
+                        key="global_foreshadowing",
+                        content=new_content,
+                        importance=10
+                    )
+                    db.add(sys_bible)
+
             db.commit()
-            print("✅ Character evolution saved to DB (Global & Branch Snapshot).")
+            print("✅ Character evolution & Plot Threads saved to DB.")
 
             # 2. 将最终章节内容写入数据库
             current_chapter_num = state.current_plot_index + 1

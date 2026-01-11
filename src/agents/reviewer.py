@@ -45,6 +45,10 @@ class ReviewerAgent:
             if anchors:
                 character_rules += f"- {name}: 禁止 {', '.join(anchors)}\n"
 
+        # 提取全局伏笔
+        active_threads = state.memory_context.global_foreshadowing
+        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个极其敏锐的小说评论家和逻辑学家。你的任务是发现草稿中的任何微小漏洞。\n"
@@ -53,6 +57,7 @@ class ReviewerAgent:
                 "- 严禁逻辑硬伤\n"
                 "- 严禁修改已确定的世界观\n"
                 "当前人物灵魂锚定：\n{character_rules}\n"
+                "【需关注的未回收伏笔】：\n{threads_str}\n"
                 "输出格式必须为 JSON。"
             )),
             ("human", (
@@ -69,7 +74,8 @@ class ReviewerAgent:
         messages = prompt.format_messages(
             draft=draft, 
             summary=last_summary,
-            character_rules=character_rules
+            character_rules=character_rules,
+            threads_str=threads_str
         )
         response = await self.llm.ainvoke(messages)
         
