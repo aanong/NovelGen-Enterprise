@@ -17,6 +17,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ..config import Config
 from ..db.vector_store import VectorStore
+from ..utils import normalize_llm_content
 
 load_dotenv()
 
@@ -92,7 +93,7 @@ class SetupReviewer:
             review_prompt.format(raw_setup=raw_setup, ref_context=ref_context)
         )
         
-        content = response.content
+        content = normalize_llm_content(response.content)
         
         # 解析返回的结构化内容
         sections = {

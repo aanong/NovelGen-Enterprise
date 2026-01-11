@@ -1,21 +1,24 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any, Optional
 from .style import StyleFeatures
 
 class NovelBible(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     world_view: str = Field(description="世界观设定")
     core_settings: Dict[str, str] = Field(default_factory=dict, description="核心设定（如功法、等级、地理等）")
     style_vector: Optional[List[float]] = Field(None, description="文风特征向量")
     style_description: Optional[StyleFeatures] = Field(None, description="文风详细特征描述")
 
 class WorldItemSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     name: str
-    description: str
-    rarity: str
-    powers: Dict[str, Any]
+    description: Optional[str] = ""
+    rarity: str = "Common"
+    powers: Dict[str, Any] = Field(default_factory=dict)
     location: Optional[str] = None
 
 class CharacterState(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     name: str
     personality_traits: Dict[str, Any] # MBTI, BigFive
     skills: List[str] = Field(default_factory=list, description="角色掌握的技能/功法")
@@ -27,6 +30,7 @@ class CharacterState(BaseModel):
     status: str = "Active"
 
 class PlotPoint(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     title: str
     description: str

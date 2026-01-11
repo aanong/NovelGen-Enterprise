@@ -105,7 +105,7 @@ async def import_novel_data(file_path: str, novel_id: int, use_llm: bool = True)
                     novel_id=novel_id,
                     chapter_number=chapter_num,
                     title=outline_dict.get("title", f"Chapter {chapter_num}"),
-                    summary=outline_dict.get("summary", "No summary provided."),
+                    scene_description=outline_dict.get("summary", "No summary provided."),
                     branch_id="main"
                 ))
         db.commit()
@@ -118,9 +118,9 @@ async def import_novel_data(file_path: str, novel_id: int, use_llm: bool = True)
             emb = get_embedding(example_sentence)
             # For simplicity, we store one representative style sentence.
             # A more complex system could store multiple examples.
-            existing = db.query(StyleRef).filter_by(novel_id=novel_id, source_text=example_sentence).first()
+            existing = db.query(StyleRef).filter_by(novel_id=novel_id, content=example_sentence).first()
             if not existing:
-                db.add(StyleRef(novel_id=novel_id, source_text=example_sentence, embedding=emb))
+                db.add(StyleRef(novel_id=novel_id, content=example_sentence, embedding=emb))
                 db.commit()
                 print("✔ Imported 1 style reference.")
 

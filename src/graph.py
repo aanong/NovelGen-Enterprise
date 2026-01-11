@@ -107,8 +107,8 @@ class NGEGraph:
                     char_state.inventory = [
                         WorldItemSchema(
                             name=item.name,
-                            description=item.description,
-                            rarity=item.rarity,
+                            description=item.description or "",
+                            rarity=item.rarity or "Common",
                             powers=item.powers or {},
                             location=item.location
                         ) for item in c.inventory
@@ -119,8 +119,8 @@ class NGEGraph:
             state.world_items = [
                 WorldItemSchema(
                     name=item.name,
-                    description=item.description,
-                    rarity=item.rarity,
+                    description=item.description or "",
+                    rarity=item.rarity or "Common",
                     powers=item.powers or {},
                     location=item.location
                 ) for item in db_items
@@ -355,17 +355,30 @@ class NGEGraph:
                             db.commit() # 确保关系保存
 
                 # --- 关键新增：保存分支快照 ---
-                snapshot = CharacterBranchStatus(
+                existing_snapshot = db.query(CharacterBranchStatus).filter_by(
                     character_id=char.id,
                     branch_id=state.current_branch,
-                    chapter_number=state.current_plot_index + 1,
-                    current_mood=char.current_mood,
-                    status=char.status,
-                    skills=char.skills,
-                    assets=char.assets,
-                    is_active=True # 默认活跃，除非 evolver 明确指出死亡
-                )
-                db.add(snapshot)
+                    chapter_number=state.current_plot_index + 1
+                ).first()
+
+                if existing_snapshot:
+                    existing_snapshot.current_mood = char.current_mood
+                    existing_snapshot.status = char.status
+                    existing_snapshot.skills = char.skills
+                    existing_snapshot.assets = char.assets
+                    existing_snapshot.is_active = True
+                else:
+                    snapshot = CharacterBranchStatus(
+                        character_id=char.id,
+                        branch_id=state.current_branch,
+                        chapter_number=state.current_plot_index + 1,
+                        current_mood=char.current_mood,
+                        status=char.status,
+                        skills=char.skills,
+                        assets=char.assets,
+                        is_active=True # 默认活跃，除非 evolver 明确指出死亡
+                    )
+                    db.add(snapshot)
                 # ---------------------------
 
             db.commit()
@@ -400,6 +413,15 @@ class NGEGraph:
             chapter_entry.summary = generate_chapter_summary(state.current_draft)
             chapter_entry.logic_checked = True
             
+            # Update PlotOutline status
+            outline = db.query(PlotOutline).filter_by(
+                novel_id=state.current_novel_id,
+                branch_id=state.current_branch,
+                chapter_number=current_chapter_num
+            ).first()
+            if outline:
+                outline.status = "completed"
+
             db.commit()
             db.refresh(chapter_entry)
             
@@ -440,7 +462,7 @@ class NGEGraph:
             f"你作为一个小说主编，现在需要对一份经过多次修改仍不合格的草稿进行最终修复。\n"
             f"修改意见：{state.review_feedback}\n"
             f"原始草稿：\n{state.current_draft}\n\n"
-            f"请直接给出修复后的完整正文，确保逻辑通顺，不再有之前的错误。"
+            f"请直接输出修复后的完整小说正文，不要包含任何前言、后语或说明性文字。只输出小说内容。"
         )
         
         # 这里直接调用 reviewer 的 llm (Gemini)

@@ -29,10 +29,18 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
         characters = {
             c.name: CharacterState(
                 name=c.name,
-                personality_traits=c.personality_traits or {},
+                personality_traits=c.personality_traits if isinstance(c.personality_traits, dict) else {"description": str(c.personality_traits)} if c.personality_traits else {},
                 skills=c.skills or [],
                 assets=c.assets or {},
-                inventory=[WorldItemSchema.from_orm(item) for item in c.inventory],
+                inventory=[
+                    WorldItemSchema(
+                        name=item.name,
+                        description=item.description or "",
+                        rarity=item.rarity or "Common",
+                        powers=item.powers or {},
+                        location=item.location
+                    ) for item in c.inventory
+                ],
                 relationships={},
                 evolution_log=c.evolution_log or ["初始导入"],
                 current_mood=c.current_mood or "平静"
@@ -44,11 +52,31 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
                 id=str(o.id),
                 title=o.title or f"第{o.chapter_number}章",
                 description=o.scene_description or "无描述",
-                key_events=[o.key_conflict] if o.key_conflict else []
+                key_events=[o.key_conflict] if o.key_conflict else [],
+                is_completed=(o.status == "completed")
             ) for o in db_outlines
         ]
         
-        world_items = [WorldItemSchema.from_orm(item) for item in db_world_items]
+        # Determine current plot index (first non-completed chapter)
+        current_plot_index = 0
+        for i, p in enumerate(plot_progress):
+            if not p.is_completed:
+                current_plot_index = i
+                break
+        else:
+            # If all existing outlines are completed, set to the end (waiting for new outline or done)
+            if plot_progress:
+                current_plot_index = len(plot_progress)
+
+        world_items = [
+            WorldItemSchema(
+                name=item.name,
+                description=item.description or "",
+                rarity=item.rarity or "Common",
+                powers=item.powers or {},
+                location=item.location
+            ) for item in db_world_items
+        ]
         
         # 简化风格加载，实际应用中可以更复杂
         style_refs = db.query(DBStyle).filter(DBStyle.novel_id == novel_id).limit(5).all()
@@ -71,6 +99,7 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> NGEState
             characters=characters,
             world_items=world_items,
             plot_progress=plot_progress,
+            current_plot_index=current_plot_index,
             memory_context=MemoryContext(
                 recent_summaries=["故事开篇"],
                 global_foreshadowing=[]
