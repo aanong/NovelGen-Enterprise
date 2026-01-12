@@ -27,7 +27,7 @@ class CharacterState(BaseModel):
     relationships: Dict[str, str]
     evolution_log: List[str]
     current_mood: str
-    status: str = "Active"
+    status: Dict[str, Any] = Field(default_factory=lambda: {"is_active": True, "reason": "Active"})
 
 class PlotPoint(BaseModel):
     model_config = ConfigDict(from_attributes=True)

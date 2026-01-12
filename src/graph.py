@@ -293,7 +293,6 @@ class NGEGraph:
         db = SessionLocal()
         try:
             # 1. 调用 Evolver Agent 分析人物变化
-            # 这里统一使用 self.evolver，它应该返回结构化的演化数据
             evolution_result = await self.evolver.evolve(state)
             
             char_map = {c.name: c for c in db.query(Character).filter(Character.novel_id == state.current_novel_id).all()}
@@ -320,6 +319,12 @@ class NGEGraph:
                     if evo.character_name in state.characters:
                         state.characters[evo.character_name].skills = char.skills
 
+                # 更新状态
+                if evo.status_change:
+                    char.status = evo.status_change
+                    if evo.character_name in state.characters:
+                        state.characters[evo.character_name].status = evo.status_change
+
                 # 更新成长日志
                 timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
                 log_entry = f"[{timestamp}] Ch.{state.current_plot_index + 1}: {evo.evolution_summary}"
@@ -327,12 +332,11 @@ class NGEGraph:
                 if evo.character_name in state.characters:
                     state.characters[evo.character_name].evolution_log.append(log_entry)
 
-                # 处理关系变更 (如果 CharacterEvolution 包含 structural data)
+                # 处理关系变更
                 if hasattr(evo, 'relationship_change') and evo.relationship_change:
                     for target_name, description in evo.relationship_change.items():
                         target_char = char_map.get(target_name)
                         if target_char:
-                            # 查找或创建关系
                             rel = db.query(CharacterRelationship).filter(
                                 ((CharacterRelationship.char_a_id == char.id) & (CharacterRelationship.char_b_id == target_char.id)) |
                                 ((CharacterRelationship.char_a_id == target_char.id) & (CharacterRelationship.char_b_id == char.id))
@@ -348,13 +352,12 @@ class NGEGraph:
                                 )
                                 db.add(rel)
                             
-                            # 更新历史记录
                             history = list(rel.history or [])
                             history.append({"chapter": state.current_plot_index + 1, "desc": description})
                             rel.history = history
-                            db.commit() # 确保关系保存
+                            db.commit()
 
-                # --- 关键新增：保存分支快照 ---
+                # 保存分支快照
                 existing_snapshot = db.query(CharacterBranchStatus).filter_by(
                     character_id=char.id,
                     branch_id=state.current_branch,
@@ -366,7 +369,7 @@ class NGEGraph:
                     existing_snapshot.status = char.status
                     existing_snapshot.skills = char.skills
                     existing_snapshot.assets = char.assets
-                    existing_snapshot.is_active = True
+                    existing_snapshot.is_active = char.status.get("is_active", True)
                 else:
                     snapshot = CharacterBranchStatus(
                         character_id=char.id,
@@ -376,38 +379,29 @@ class NGEGraph:
                         status=char.status,
                         skills=char.skills,
                         assets=char.assets,
-                        is_active=True # 默认活跃，除非 evolver 明确指出死亡
+                        is_active=char.status.get("is_active", True)
                     )
                     db.add(snapshot)
-                # ---------------------------
 
-            # 处理剧情线更新 (Foreshadowing)
+            # 处理剧情线更新
             if evolution_result.story_updates:
                 updates = evolution_result.story_updates
                 
-                # 1. 添加新伏笔
                 if updates.new_foreshadowing:
                     for f in updates.new_foreshadowing:
                         if f not in state.memory_context.global_foreshadowing:
                             state.memory_context.global_foreshadowing.append(f)
                             print(f"📖 New Foreshadowing: {f}")
 
-                # 2. 移除已解决伏笔
                 if updates.resolved_threads:
-                    # 使用简单的字符串匹配或包含检查
-                    # 实际生产中可能需要更智能的匹配，这里暂用移除完全匹配或相似项
                     original_threads = list(state.memory_context.global_foreshadowing)
                     for resolved in updates.resolved_threads:
-                        # 尝试找到最相似的现有伏笔并移除 (这里简化为包含检测)
-                        # 如果 resolved 是 "关于神秘盒子的秘密"，而列表里有 "神秘盒子"，则认为移除了
                         for existing in original_threads:
                             if existing in resolved or resolved in existing:
                                 if existing in state.memory_context.global_foreshadowing:
                                     state.memory_context.global_foreshadowing.remove(existing)
                                     print(f"✅ Resolved Thread: {existing}")
 
-                # 持久化全局伏笔到数据库
-                # 使用 NovelBible 存储系统状态 (category='system_state')
                 sys_bible = db.query(NovelBible).filter(
                     NovelBible.novel_id == state.current_novel_id,
                     NovelBible.category == "system_state",
@@ -431,10 +425,9 @@ class NGEGraph:
             db.commit()
             print("✅ Character evolution & Plot Threads saved to DB.")
 
-            # 2. 将最终章节内容写入数据库
+            # 将最终章节内容写入数据库
             current_chapter_num = state.current_plot_index + 1
             
-            # 创建或更新本章
             chapter_entry = db.query(DBChapter).filter_by(
                 novel_id=state.current_novel_id,
                 branch_id=state.current_branch,
@@ -455,12 +448,10 @@ class NGEGraph:
                 chapter_entry.title = state.plot_progress[state.current_plot_index].title
                 
             chapter_entry.content = state.current_draft
-            # 生成摘要 (简单处理)
             from .utils import generate_chapter_summary
             chapter_entry.summary = generate_chapter_summary(state.current_draft)
             chapter_entry.logic_checked = True
             
-            # Update PlotOutline status
             outline = db.query(PlotOutline).filter_by(
                 novel_id=state.current_novel_id,
                 branch_id=state.current_branch,
@@ -472,14 +463,12 @@ class NGEGraph:
             db.commit()
             db.refresh(chapter_entry)
             
-            # 更新 memory_context
             state.memory_context.recent_summaries.append(chapter_entry.summary)
             if len(state.memory_context.recent_summaries) > 5:
                 state.memory_context.recent_summaries.pop(0)
 
             print(f"✅ Chapter {current_chapter_num} finalized and saved to DB (ID: {chapter_entry.id}).")
             
-            # 3. 结束性能监控会话
             monitor.end_session(state.current_plot_index, success=True, retry_count=state.retry_count)
             
             return {
@@ -499,12 +488,7 @@ class NGEGraph:
     async def repair_node(self, state: NGEState):
         """Rule 5.2: Gemini 介入重写修复"""
         print("🔴 触发 Rule 5.2：Gemini 执行强制修复...")
-        
-        # 利用 ReviewerAgent (现在是 Gemini) 进行修复
-        # 这里我们可以调用一个新的方法或者复用 review 方法的 logic，
-        # 但为了清晰，我们假设 ReviewerAgent 有一个 fix_draft 方法。
-        # 如果没有，我们就原位实现一个简单的 Prompt。
-        
+
         prompt = (
             f"你作为一个小说主编，现在需要对一份经过多次修改仍不合格的草稿进行最终修复。\n"
             f"修改意见：{state.review_feedback}\n"
@@ -512,7 +496,6 @@ class NGEGraph:
             f"请直接输出修复后的完整小说正文，不要包含任何前言、后语或说明性文字。只输出小说内容。"
         )
         
-        # 这里直接调用 reviewer 的 llm (Gemini)
         response = await self.reviewer.llm.ainvoke(prompt)
         fixed_draft = normalize_llm_content(response.content)
         fixed_draft = strip_think_tags(fixed_draft)
@@ -529,7 +512,8 @@ class NGEGraph:
             print("🟢 审核通过。")
             return "continue"
         
-        if state.retry_count >= state.max_retry_limit:
+        max_retry_limit = 3
+        if state.retry_count >= max_retry_limit:
             print(f"🔴 熔断保护：已重试 {state.retry_count} 次，进入 Gemini 分级修复。")
             return "repair"
             

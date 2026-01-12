@@ -10,6 +10,7 @@ class CharacterEvolution(BaseModel):
     mood_change: str = Field(description="角色的心情变化，如'从平静变为愤怒'")
     skill_update: List[str] = Field(default_factory=list, description="角色获得或失去的技能")
     relationship_change: Dict[str, str] = Field(default_factory=dict, description="与其他角色关系的变化，格式：{'角色名': '关系描述'}")
+    status_change: Optional[Dict[str, Any]] = Field(None, description="角色状态变更，如死亡、受伤等")
     evolution_summary: str = Field(description="描述角色为何以及如何发生这些变化的简短摘要")
 
 class PlotUpdate(BaseModel):
@@ -54,7 +55,7 @@ class CharacterEvolver:
         {active_threads_str}
 
         请根据章节内容：
-        1. 为每一个发生了显著变化的人物（心情、技能、人际关系等）生成演化报告。
+        1. 为每一个发生了显著变化的人物（心情、技能、人际关系、状态等）生成演化报告。
         2. 分析本章是否埋下了新的伏笔？
         3. 分析本章是否回收/解决了上述"当前未解决伏笔"中的任何一项？
 
@@ -67,6 +68,7 @@ class CharacterEvolver:
                     "mood_change": "...",
                     "skill_update": ["..."],
                     "relationship_change": {{ "角色B": "..." }},
+                    "status_change": {{ "is_active": false, "reason": "死亡" }},
                     "evolution_summary": "..."
                 }}
             ],

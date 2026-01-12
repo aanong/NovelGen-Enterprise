@@ -14,3 +14,4 @@ uvicorn
 celery[redis]
 redis
 sse-starlette
+tiktoken
