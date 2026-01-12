@@ -137,7 +137,7 @@ class WriterAgent:
 
         messages = prompt.format_messages(
             style_prompt=style_prompt,
-            character_context=chr(10).join(character_context),
+            character_context="\n".join(character_context),
             scene_rules=scene_rules,
             refined_context_str=refined_context_str,
             history_summary=history_summary,

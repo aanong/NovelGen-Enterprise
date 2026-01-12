@@ -33,7 +33,15 @@ class RedisStreamService:
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    yield message["data"]
+                    data = message["data"]
+                    if isinstance(data, str):
+                        try:
+                            yield json.loads(data)
+                            continue
+                        except json.JSONDecodeError:
+                            yield {"type": "message", "data": {"raw": data}}
+                            continue
+                    yield data
         finally:
             await pubsub.unsubscribe(channel_name)
             await pubsub.close()

@@ -59,7 +59,7 @@ class ArchitectAgent:
             self.llm = ChatGoogleGenerativeAI(
                 model=Config.model.GEMINI_MODEL,
                 google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=Config.model.DEEPSEEK_ARCHITECT_TEMP
+                temperature=Config.model.GEMINI_TEMPERATURE
             )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
         self.plan_parser = PydanticOutputParser(pydantic_object=ChapterPlan)

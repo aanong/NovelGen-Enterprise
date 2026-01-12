@@ -23,8 +23,6 @@ class ReviewerAgent:
             self.llm = MockChatModel(responses=[
                 # Response for review_draft
                 json.dumps({"passed": True, "score": 0.9, "feedback": "Good job", "logical_errors": []}),
-                # Response for evolve_characters (if called, but EvolverAgent seems to be used instead in graph)
-                json.dumps({"new_mood": "Happy", "evolution_summary": "Evolved", "new_skills": [], "asset_changes": {}, "acquired_items": [], "lost_items": [], "relationship_changes": [], "summary": "Ch summary"})
             ])
         else:
             self.llm = ChatGoogleGenerativeAI(
@@ -92,52 +90,3 @@ class ReviewerAgent:
             }
             
         return result
-
-    async def evolve_characters(self, state: NGEState, draft: str) -> Dict[str, Any]:
-        """
-        CharacterEvolver: 分析该章节发生的事件是否改变了人物的心境或关系。
-        遵循 Rule 3.2: 人物立体与成长
-        """
-        char_list = ", ".join(state.characters.keys())
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", (
-                "你是一个心理分析专家和人物塑造师。\n"
-                f"当前活跃角色：{char_list}\n"
-                "请分析本章事件对这些角色的心境、性格、关系的影响。\n"
-                "输出格式必须为 JSON。"
-            )),
-            ("human", (
-                "角色初始状态：{char_states}\n"
-                "本章内容：\n{draft}\n\n"
-                "请分析并返回 JSON，包含每个角色的更新状态。字段要求：\n"
-                "- new_mood: 变化后的心情描述\n"
-                "- evolution_summary: 本章成长/变化摘要\n"
-                "- new_skills: 本章习得的新技能列表 (若无则为空列表)\n"
-                "- asset_changes: 资产变动 (如 {'灵石': -10}) (若无则为空字典)\n"
-                "- acquired_items: 本章获得的关键物品名称列表 (若无则为空列表)\n"
-                "- lost_items: 本章失去/消耗的关键物品名称列表 (若无则为空列表)\n"
-                "- relationship_changes: 关系变动列表，每项需包含 {'target': '对方名', 'change_type': '类型', 'value': 0.1} (若无则为空列表)\n"
-                "- summary: 整个章节的文字总结 (String)"
-            ))
-        ])
-        
-        char_states = json.dumps({
-            n: {
-                "mood": c.current_mood, 
-                "personality": c.personality_traits,
-                "skills": c.skills,
-                "assets": c.assets,
-                "inventory": [i.name for i in c.inventory]
-            } for n, c in state.characters.items()
-        }, ensure_ascii=False)
-        
-        messages = prompt.format_messages(
-            draft=draft,
-            char_states=char_states
-        )
-        response = await self.llm.ainvoke(messages)
-        
-        content_str = normalize_llm_content(response.content)
-        content_str = strip_think_tags(content_str)
-        return extract_json_from_text(content_str) or {}
