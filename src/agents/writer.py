@@ -1,114 +1,200 @@
-import os
+"""
+Writer Agent 模块
+负责正文撰写与文风模仿
+"""
 import re
-import json
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
+from typing import Optional
 from langchain_core.prompts import ChatPromptTemplate
 from ..schemas.state import NGEState
 from ..config import Config
 from ..utils import strip_think_tags, normalize_llm_content
-from dotenv import load_dotenv
+from .base import BaseAgent
+from .constants import SceneType, Defaults, PromptTemplates, ErrorMessages
 
-load_dotenv()
-
-class WriterAgent:
+class WriterAgent(BaseAgent):
     """
-    Writer Agent (DeepSeek -> Gemini): 负责正文撰写与文风模仿。
-    Switching to Gemini for stability in this environment.
+    Writer Agent: 负责正文撰写与文风模仿
+    
+    遵循 Antigravity Rules:
+    - Rule 2.1: 人物灵魂锚定
+    - Rule 6.1: 场景化强制约束
+    - Rule 6.2: 验证前缀
+    - Rule 4.1: 清除思考标签
     """
-    def __init__(self):
-        if Config.model.GEMINI_MODEL == "mock":
-            from ..utils import MockChatModel
-            self.llm = MockChatModel(responses=[
-                "当前遵循：Normal 场景\n这是一个用于测试的章节正文。主角李青云站在青云山巅，俯瞰着云海。"
-            ])
-        elif "localhost" in Config.model.DEEPSEEK_API_BASE or Config.model.DEEPSEEK_API_KEY == "ollama":
-            self.llm = ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=Config.model.GEMINI_TEMPERATURE
-            )
-        else:
-            self.llm = ChatOpenAI(
-                model=Config.model.DEEPSEEK_MODEL,
-                openai_api_key=Config.model.DEEPSEEK_API_KEY,
-                openai_api_base=Config.model.DEEPSEEK_API_BASE,
-                temperature=Config.model.GEMINI_TEMPERATURE
-            )
+    
+    def __init__(self, temperature: Optional[float] = None):
+        """
+        初始化 Writer Agent
+        
+        Args:
+            temperature: 温度参数，默认使用配置值
+        """
+        super().__init__(
+            model_name="gemini",  # Writer 使用 Gemini
+            temperature=temperature or Config.model.GEMINI_TEMPERATURE,
+            mock_responses=[
+                f"当前遵循：{SceneType.NORMAL} 场景\n这是一个用于测试的章节正文。主角李青云站在青云山巅，俯瞰着云海。"
+            ]
+        )
 
+    async def process(self, state: NGEState, plan_instruction: str) -> str:
+        """
+        处理写作任务（实现基类接口）
+        
+        Args:
+            state: 当前状态
+            plan_instruction: 规划指令
+            
+        Returns:
+            生成的章节正文
+        """
+        return await self.write_chapter(state, plan_instruction)
+    
     async def write_chapter(self, state: NGEState, plan_instruction: str) -> str:
         """
-        撰写章节正文。
-        注入文风特征和角色设定。
-        遵循 Antigravity Rules: 2.1 (人物锚定), 6.1 (场景约束), 6.2 (验证前缀)
-        """
-        if state.current_plot_index >= len(state.plot_progress):
-            current_point_title = "后续章节"
-            current_point_desc = "跟随前文剧情自然发展"
-        else:
-            current_point = state.plot_progress[state.current_plot_index]
-            current_point_title = current_point.title
-            current_point_desc = current_point.description
-
-        style = state.novel_bible.style_description
+        撰写章节正文
         
-        # 1. 构建 System Prompt
-        style_prompt = ""
-        if style:
-            style_prompt = (
-                f"文风规范：\n"
-                f"- 句式：{style.rhythm_description}，{style.dialogue_narration_ratio} 的对话旁白比。\n"
-                f"- 修辞偏好：{', '.join(style.common_rhetoric)}。\n"
-                f"- 情绪基调：{style.emotional_tone}。\n"
-                f"- 核心词汇：{', '.join(style.vocabulary_preference)}。\n"
-            )
-
-        # 2. Rule 2.1: 人物灵魂锚定
-        character_context = []
-        for name, c in state.characters.items():
+        注入文风特征和角色设定，遵循 Antigravity Rules
+        
+        Args:
+            state: 当前状态
+            plan_instruction: 规划指令
+            
+        Returns:
+            生成的章节正文
+        """
+        # 构建提示词组件
+        plot_info = self._extract_plot_info(state)
+        style_prompt = self._build_style_prompt(state)
+        character_context = self._build_character_context(state)
+        scene_rules = self._build_scene_rules(state)
+        context_str = self._build_context_string(state)
+        
+        # 构建并发送提示词
+        prompt = self._create_writing_prompt()
+        messages = prompt.format_messages(
+            style_prompt=style_prompt,
+            character_context=character_context,
+            scene_rules=scene_rules,
+            refined_context_str=context_str,
+            history_summary=self._build_history_summary(state),
+            threads_str=self._build_threads_string(state),
+            current_point_title=plot_info["title"],
+            current_point_desc=plot_info["description"],
+            plan_instruction=plan_instruction,
+            target_length=Config.writing.TARGET_CHAPTER_LENGTH,
+            min_length=Config.writing.MIN_CHAPTER_LENGTH
+        )
+        
+        # 调用 LLM 并处理响应
+        response = await self.llm.ainvoke(messages)
+        content = self._process_llm_response(response)
+        
+        return content
+    
+    def _extract_plot_info(self, state: NGEState) -> dict:
+        """提取剧情点信息"""
+        if state.current_plot_index >= len(state.plot_progress):
+            return {
+                "title": "后续章节",
+                "description": "跟随前文剧情自然发展"
+            }
+        current_point = state.plot_progress[state.current_plot_index]
+        return {
+            "title": current_point.title,
+            "description": current_point.description
+        }
+    
+    def _build_style_prompt(self, state: NGEState) -> str:
+        """构建文风提示词"""
+        style = state.novel_bible.style_description
+        if not style:
+            return ""
+        
+        return (
+            f"文风规范：\n"
+            f"- 句式：{style.rhythm_description}，{style.dialogue_narration_ratio} 的对话旁白比。\n"
+            f"- 修辞偏好：{', '.join(style.common_rhetoric)}。\n"
+            f"- 情绪基调：{style.emotional_tone}。\n"
+            f"- 核心词汇：{', '.join(style.vocabulary_preference)}。\n"
+        )
+    
+    def _build_character_context(self, state: NGEState) -> str:
+        """构建人物上下文"""
+        character_lines = []
+        
+        for name, char in state.characters.items():
+            # 获取禁忌行为
             forbidden = state.antigravity_context.character_anchors.get(name, [])
             forbidden_str = f"【禁止行为：{', '.join(forbidden)}】" if forbidden else ""
             
-            skills_str = f"技能:{', '.join(c.skills)}" if c.skills else ""
-            assets_list = [f"{k}: {v}" for k, v in c.assets.items()]
-            assets_str = f"资产:[{', '.join(assets_list)}]" if assets_list else ""
-            items_str = f"持有物:{', '.join([i.name for i in c.inventory])}" if c.inventory else ""
-            
-            char_info = [
-                f"- {name}: {c.personality_traits.get('role', '')}",
-                f"性格:{c.personality_traits.get('personality', '')}",
-                f"状态:{c.current_mood}"
+            # 构建角色信息
+            char_info_parts = [
+                f"- {name}: {char.personality_traits.get('role', '')}",
+                f"性格:{char.personality_traits.get('personality', '')}",
+                f"状态:{char.current_mood}"
             ]
-            if skills_str: char_info.append(skills_str)
-            if assets_str: char_info.append(assets_str)
-            if items_str: char_info.append(items_str)
-            if forbidden_str: char_info.append(forbidden_str)
             
-            character_context.append(", ".join(char_info))
+            # 添加技能
+            if char.skills:
+                char_info_parts.append(f"技能:{', '.join(char.skills)}")
+            
+            # 添加资产
+            if char.assets:
+                assets_list = [f"{k}: {v}" for k, v in char.assets.items()]
+                char_info_parts.append(f"资产:[{', '.join(assets_list)}]")
+            
+            # 添加物品
+            if char.inventory:
+                items_list = [item.name for item in char.inventory]
+                char_info_parts.append(f"持有物:{', '.join(items_list)}")
+            
+            # 添加禁忌
+            if forbidden_str:
+                char_info_parts.append(forbidden_str)
+            
+            character_lines.append(", ".join(char_info_parts))
         
-        # 3. Rule 6.1: 场景化强制约束
+        return "\n".join(character_lines)
+    
+    def _build_scene_rules(self, state: NGEState) -> str:
+        """构建场景约束规则"""
         scene_constraints = state.antigravity_context.scene_constraints
-        scene_type = scene_constraints.get("scene_type", "Normal")
-        scene_rules = ""
+        scene_type = scene_constraints.get("scene_type", SceneType.NORMAL)
         
         cfg_constraints = Config.antigravity.SCENE_CONSTRAINTS.get(scene_type, {})
-        if cfg_constraints:
-            pref = cfg_constraints.get("preferred_style", "")
-            forb = ", ".join(cfg_constraints.get("forbidden_patterns", []))
-            scene_rules = f"\n【场景强制约束 - {scene_type}】\n- 风格要求：{pref}\n- 禁忌模式：{forb}"
-
-        # 4. RAG & History
-        refined_context_str = ""
-        if state.refined_context:
-            refined_context_str = "\n【相关背景与细节设定】\n" + "\n".join(state.refined_context) + "\n"
-
-        # 提取全局伏笔
+        if not cfg_constraints:
+            return ""
+        
+        preferred_style = cfg_constraints.get("preferred_style", "")
+        forbidden_patterns = ", ".join(cfg_constraints.get("forbidden_patterns", []))
+        
+        return PromptTemplates.SCENE_CONSTRAINT_TEMPLATE.format(
+            scene_type=scene_type,
+            preferred_style=preferred_style,
+            forbidden_patterns=forbidden_patterns
+        )
+    
+    def _build_context_string(self, state: NGEState) -> str:
+        """构建 RAG 上下文字符串"""
+        if not state.refined_context:
+            return ""
+        return "\n【相关背景与细节设定】\n" + "\n".join(state.refined_context) + "\n"
+    
+    def _build_history_summary(self, state: NGEState) -> str:
+        """构建历史摘要"""
+        return '\n'.join(state.memory_context.recent_summaries)
+    
+    def _build_threads_string(self, state: NGEState) -> str:
+        """构建伏笔字符串"""
         active_threads = state.memory_context.global_foreshadowing
-        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
-
-        history_summary = '\n'.join(state.memory_context.recent_summaries)
-
-        prompt = ChatPromptTemplate.from_messages([
+        if not active_threads:
+            return "无"
+        return "\n".join([f"- {t}" for t in active_threads])
+    
+    def _create_writing_prompt(self) -> ChatPromptTemplate:
+        """创建写作提示词模板"""
+        return ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个极具天赋的长篇小说作家。擅长细腻的描写和深刻的人物塑造。\n"
                 "{style_prompt}\n"
@@ -121,7 +207,7 @@ class WriterAgent:
                 "【未解决伏笔/悬念】：\n"
                 "{threads_str}\n"
                 "\n【核心执行准则】\n"
-                "- Rule 6.2: 在回复的开头必须以“当前遵循：[场景准则]”作为验证（如：当前遵循：Action 场景，短促动词，禁用长句）。\n"
+                "- Rule 6.2: 在回复的开头必须以"当前遵循：[场景准则]"作为验证（如：当前遵循：Action 场景，短促动词，禁用长句）。\n"
                 "- 绝对禁止让角色做出其【禁止行为】中的动作。\n"
                 "- 绝对遵守场景强制约束，这是文风的一致性保证。\n"
                 "- 保持角色心境与当前状态一致。\n"
@@ -131,26 +217,16 @@ class WriterAgent:
                 "当前剧情：{current_point_title}\n"
                 "核心内容：{current_point_desc}\n"
                 "具体指令：{plan_instruction}\n\n"
-                "请开始撰写正文。字数建议在 2500 字以上，确保情节饱满，文风统一。"
+                "请开始撰写正文。字数建议在 {target_length} 字以上（最少 {min_length} 字），确保情节饱满，文风统一。"
             ))
         ])
-
-        messages = prompt.format_messages(
-            style_prompt=style_prompt,
-            character_context="\n".join(character_context),
-            scene_rules=scene_rules,
-            refined_context_str=refined_context_str,
-            history_summary=history_summary,
-            threads_str=threads_str,
-            current_point_title=current_point_title,
-            current_point_desc=current_point_desc,
-            plan_instruction=plan_instruction
-        )
-        response = await self.llm.ainvoke(messages)
+    
+    def _process_llm_response(self, response) -> str:
+        """处理 LLM 响应"""
         content = normalize_llm_content(response.content)
-        content = strip_think_tags(content)
+        content = strip_think_tags(content)  # Rule 4.1: 清除思考标签
         
-        # Rule 6.2 & 4.1: 清理验证前缀和思考标签
+        # Rule 6.2: 清理验证前缀
         content = re.sub(r'^当前遵循：.*?\n', '', content).strip()
         
         return content

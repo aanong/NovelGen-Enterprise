@@ -108,18 +108,55 @@ class Config:
     
     @classmethod
     def validate(cls) -> Dict[str, Any]:
-        """验证配置完整性"""
-        issues = []
+        """
+        验证配置完整性
         
+        Returns:
+            包含验证结果的字典:
+            - valid: 是否有效
+            - issues: 问题列表
+            - warnings: 警告列表
+        """
+        issues = []
+        warnings = []
+        
+        # 必需配置检查
         if not cls.model.GEMINI_API_KEY:
-            issues.append("缺少 GOOGLE_API_KEY")
+            issues.append("缺少 GOOGLE_API_KEY (必需)")
         
         if not cls.database.POSTGRES_URL:
-            issues.append("缺少 POSTGRES_URL")
+            issues.append("缺少 POSTGRES_URL (必需)")
+        
+        # 配置合理性检查
+        if cls.antigravity.MAX_RETRY_LIMIT < 1:
+            issues.append(f"MAX_RETRY_LIMIT 必须 >= 1，当前值: {cls.antigravity.MAX_RETRY_LIMIT}")
+        
+        if cls.antigravity.MAX_RETRY_LIMIT > 10:
+            warnings.append(f"MAX_RETRY_LIMIT 过大 ({cls.antigravity.MAX_RETRY_LIMIT})，可能导致长时间等待")
+        
+        if cls.writing.MIN_CHAPTER_LENGTH > cls.writing.TARGET_CHAPTER_LENGTH:
+            issues.append(
+                f"MIN_CHAPTER_LENGTH ({cls.writing.MIN_CHAPTER_LENGTH}) "
+                f"不能大于 TARGET_CHAPTER_LENGTH ({cls.writing.TARGET_CHAPTER_LENGTH})"
+            )
+        
+        if cls.writing.MIN_LOGIC_SCORE < 0 or cls.writing.MIN_LOGIC_SCORE > 1:
+            issues.append(f"MIN_LOGIC_SCORE 必须在 0-1 之间，当前值: {cls.writing.MIN_LOGIC_SCORE}")
+        
+        if cls.database.POOL_SIZE < 1:
+            issues.append(f"DB_POOL_SIZE 必须 >= 1，当前值: {cls.database.POOL_SIZE}")
+        
+        if cls.database.MAX_OVERFLOW < 0:
+            issues.append(f"DB_MAX_OVERFLOW 必须 >= 0，当前值: {cls.database.MAX_OVERFLOW}")
+        
+        # 模型配置检查
+        if cls.model.GEMINI_TEMPERATURE < 0 or cls.model.GEMINI_TEMPERATURE > 2:
+            warnings.append(f"GEMINI_TEMPERATURE 超出推荐范围 (0-2)，当前值: {cls.model.GEMINI_TEMPERATURE}")
         
         return {
             "valid": len(issues) == 0,
-            "issues": issues
+            "issues": issues,
+            "warnings": warnings
         }
     
     @classmethod

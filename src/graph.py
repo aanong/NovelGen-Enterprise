@@ -1,4 +1,8 @@
-from typing import TypedDict, Annotated, Sequence
+"""
+NGEGraph 模块
+定义 NovelGen-Enterprise 的工作流图
+"""
+from typing import Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from .schemas.state import NGEState, WorldItemSchema
 from .agents.architect import ArchitectAgent
@@ -6,13 +10,22 @@ from .agents.writer import WriterAgent
 from .agents.reviewer import ReviewerAgent
 from .agents.style_analyzer import StyleAnalyzer
 from .agents.evolver import CharacterEvolver
+from .agents.constants import NodeAction, ReviewDecision, OutlineStatus, Defaults
 from .db.base import SessionLocal
-from .db.models import Novel, NovelBible, Character, CharacterRelationship, PlotOutline, LogicAudit, Chapter as DBChapter, WorldItem, CharacterBranchStatus
+from .db.models import (
+    Novel, NovelBible, Character, CharacterRelationship, 
+    PlotOutline, LogicAudit, Chapter as DBChapter, 
+    WorldItem, CharacterBranchStatus
+)
 from .db.vector_store import VectorStore
 from .monitoring import monitor
 from .utils import strip_think_tags, normalize_llm_content
+from .config import Config
 import json
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class NGEGraph:
     def __init__(self):
@@ -49,9 +62,9 @@ class NGEGraph:
             "review",
             self.should_continue,
             {
-                "continue": "evolve",
-                "revise": "write",
-                "repair": "repair"
+                ReviewDecision.CONTINUE: NodeAction.EVOLVE,
+                ReviewDecision.REVISE: NodeAction.WRITE,
+                ReviewDecision.REPAIR: NodeAction.REPAIR
             }
         )
         
@@ -141,9 +154,11 @@ class NGEGraph:
                 if latest_chapter:
                     start_chapter_id = latest_chapter.id
             
-            # 开始回溯
+            # 开始回溯（使用配置中的最大上下文章节数）
+            from .config import Config
+            max_context_chapters = Config.antigravity.MAX_CONTEXT_CHAPTERS
             curr_id = start_chapter_id
-            for _ in range(10): # 回溯 10 章, 增加上下文窗口防止剧情漂移
+            for _ in range(max_context_chapters): # 回溯章节数可配置，增加上下文窗口防止剧情漂移
                 if not curr_id:
                     break
                 ch = db.query(DBChapter).filter(DBChapter.id == curr_id).first()
@@ -159,6 +174,7 @@ class NGEGraph:
             
             return {"next_action": "plan"}
         except Exception as e:
+            logger.error(f"Error loading context for chapter {current_ch}: {e}", exc_info=True)
             print(f"Error loading context: {e}")
             return {"next_action": "plan"}
         finally:
@@ -191,7 +207,7 @@ class NGEGraph:
                 else:
                     instruction = f"Scene: {outline.scene_description}\nConflict: {outline.key_conflict}"
                 
-                return {"next_action": "refine_context", "review_feedback": instruction}
+                return {"next_action": NodeAction.REFINE_CONTEXT, "review_feedback": instruction}
 
             # 2. 调用 Architect Agent 生成
             plan_data = await self.architect.plan_next_chapter(state)
@@ -208,10 +224,11 @@ class NGEGraph:
             db.add(new_outline)
             db.commit()
             
-            return {"next_action": "refine_context", "review_feedback": plan_data["instruction"]}
+            return {"next_action": NodeAction.REFINE_CONTEXT, "review_feedback": plan_data["instruction"]}
         except Exception as e:
+            logger.error(f"Planning error for chapter {current_chapter_num}: {e}", exc_info=True)
             print(f"Planning Error: {e}")
-            return {"next_action": "refine_context", "review_feedback": "Error in planning."}
+            return {"next_action": NodeAction.REFINE_CONTEXT, "review_feedback": "Error in planning."}
         finally:
             db.close()
 
@@ -243,19 +260,20 @@ class NGEGraph:
             )
             
             return {
-                "next_action": "write",
+                "next_action": NodeAction.WRITE,
                 "review_feedback": enhanced_instruction
             }
         except Exception as e:
+            logger.error(f"RAG refinement error: {e}", exc_info=True)
             print(f"RAG Error: {e}")
-            return {"next_action": "write"}
+            return {"next_action": NodeAction.WRITE}
         finally:
             vs.close()
 
     async def write_node(self, state: NGEState):
         print("--- WRITING CHAPTER ---")
         draft = await self.writer.write_chapter(state, state.review_feedback)
-        return {"current_draft": draft, "next_action": "review"}
+        return {"current_draft": draft, "next_action": NodeAction.REVIEW}
 
     async def review_node(self, state: NGEState):
         print("--- REVIEWING DRAFT ---")
@@ -274,10 +292,10 @@ class NGEGraph:
             db.commit()
 
             if review_result.get("passed"):
-                return {"next_action": "evolve", "review_feedback": "Passed"}
+                return {"next_action": NodeAction.EVOLVE, "review_feedback": "Passed"}
             else:
                 return {
-                    "next_action": "write", 
+                    "next_action": NodeAction.WRITE, 
                     "review_feedback": f"修正建议：{review_result.get('feedback')}",
                     "retry_count": state.retry_count + 1
                 }
@@ -458,13 +476,16 @@ class NGEGraph:
                 chapter_number=current_chapter_num
             ).first()
             if outline:
-                outline.status = "completed"
+                outline.status = OutlineStatus.COMPLETED
 
             db.commit()
             db.refresh(chapter_entry)
             
             state.memory_context.recent_summaries.append(chapter_entry.summary)
-            if len(state.memory_context.recent_summaries) > 5:
+            # 使用配置中的最近章节上下文数量限制
+            from .config import Config
+            max_recent_summaries = Config.antigravity.RECENT_CHAPTERS_CONTEXT
+            if len(state.memory_context.recent_summaries) > max_recent_summaries:
                 state.memory_context.recent_summaries.pop(0)
 
             print(f"✅ Chapter {current_chapter_num} finalized and saved to DB (ID: {chapter_entry.id}).")
@@ -478,6 +499,7 @@ class NGEGraph:
             }
 
         except Exception as e:
+            logger.error(f"Error during evolution/finalizing for chapter {state.current_plot_index + 1}: {e}", exc_info=True)
             print(f"❌ Error during evolution/finalizing: {e}")
             db.rollback()
             monitor.end_session(state.current_plot_index, success=False)
@@ -502,20 +524,39 @@ class NGEGraph:
         
         return {
             "current_draft": fixed_draft,
-            "next_action": "evolve",
+            "next_action": NodeAction.EVOLVE,
             "review_feedback": "Fixed by Gemini (Rule 5.2)"
         }
 
-    def should_continue(self, state: NGEState):
-        """Rule 5.1 & 5.2: 循环熔断机制"""
-        if state.next_action == "evolve":
-            print("🟢 审核通过。")
-            return "continue"
+    def should_continue(self, state: NGEState) -> str:
+        """
+        Rule 5.1 & 5.2: 循环熔断机制
         
-        max_retry_limit = 3
+        Args:
+            state: 当前状态
+            
+        Returns:
+            下一步动作: "continue", "revise", 或 "repair"
+        """
+        if state.next_action == NodeAction.EVOLVE:
+            print("🟢 审核通过。")
+            return ReviewDecision.CONTINUE
+        
+        # 使用 state 中的配置，如果没有则使用 Config 默认值
+        max_retry_limit = (
+            state.max_retry_limit 
+            if hasattr(state, 'max_retry_limit') 
+            else Config.antigravity.MAX_RETRY_LIMIT
+        )
+        
         if state.retry_count >= max_retry_limit:
             print(f"🔴 熔断保护：已重试 {state.retry_count} 次，进入 Gemini 分级修复。")
-            return "repair"
+            # 记录违规信息
+            if hasattr(state, 'antigravity_context'):
+                state.antigravity_context.violated_rules.append(
+                    f"Rule 5.2 Triggered: 第{state.current_plot_index + 1}章在第{state.retry_count}次重试后强制通过"
+                )
+            return ReviewDecision.REPAIR
             
         print(f"🔄 准备第 {state.retry_count + 1} 次生成...")
-        return "revise"
+        return ReviewDecision.REVISE

@@ -1,8 +1,12 @@
 from ..schemas.state import NGEState, CharacterState
 from ..llms import get_llm
 from ..utils import normalize_llm_content, extract_json_from_text
+from ..config import Config
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CharacterEvolution(BaseModel):
     """定义了单个人物在一个章节内的状态演化"""
@@ -28,6 +32,7 @@ class CharacterEvolver:
     遵循 Antigravity Rule 3.2 (人物立体与成长) 及 Rule 3.4 (伏笔回收).
     """
     def __init__(self):
+        # 使用配置中的逻辑模型（通常是 deepseek）
         self.llm = get_llm(model_name="deepseek") # 使用逻辑模型进行分析
 
     async def evolve(self, state: NGEState) -> EvolutionResult:
@@ -79,11 +84,16 @@ class CharacterEvolver:
         }}
         """
         
-        response = await self.llm.ainvoke(prompt)
-        content = normalize_llm_content(response.content)
-        json_data = extract_json_from_text(content)
-        if not json_data:
-            # Return empty result if parsing fails
-            return EvolutionResult(evolutions=[])
+        try:
+            response = await self.llm.ainvoke(prompt)
+            content = normalize_llm_content(response.content)
+            json_data = extract_json_from_text(content)
+            if not json_data:
+                logger.warning(f"无法从 LLM 响应中提取 JSON，返回空演化结果。响应内容: {content[:200]}...")
+                return EvolutionResult(evolutions=[])
             
-        return EvolutionResult.model_validate(json_data)
+            return EvolutionResult.model_validate(json_data)
+        except Exception as e:
+            logger.error(f"人物演化分析失败: {e}", exc_info=True)
+            # 返回空结果，避免阻塞流程
+            return EvolutionResult(evolutions=[])
