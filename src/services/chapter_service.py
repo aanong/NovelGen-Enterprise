@@ -1,15 +1,24 @@
-from typing import List, Optional
+from typing import List
 from sqlalchemy.orm import Session
+from src.db.chapter_repository import ChapterRepository
+from src.api.schemas import ChapterResponse, ChapterCreate
 from src.db.models import Chapter
 
 class ChapterService:
-    @staticmethod
-    def get_chapters(db: Session, novel_id: int, branch_id: str = "main", skip: int = 0, limit: int = 100) -> List[Chapter]:
-        return db.query(Chapter).filter(
-            Chapter.novel_id == novel_id,
-            Chapter.branch_id == branch_id
-        ).order_by(Chapter.chapter_number).offset(skip).limit(limit).all()
+    def __init__(self, db: Session):
+        self.chapter_repository = ChapterRepository(db)
 
-    @staticmethod
-    def get_chapter(db: Session, chapter_id: int) -> Optional[Chapter]:
-        return db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    def get_chapters_by_novel(self, novel_id: int, branch_id: str = "main", skip: int = 0, limit: int = 100) -> List[ChapterResponse]:
+        chapters = self.chapter_repository.get_by_novel_id(novel_id, branch_id, skip, limit)
+        return [ChapterResponse.from_orm(chapter) for chapter in chapters]
+
+    def get_chapter(self, chapter_id: int) -> ChapterResponse:
+        chapter = self.chapter_repository.get(chapter_id)
+        if chapter:
+            return ChapterResponse.from_orm(chapter)
+        return None
+
+    def create_chapter(self, chapter: ChapterCreate) -> ChapterResponse:
+        db_chapter = Chapter(**chapter.dict())
+        created_chapter = self.chapter_repository.add(db_chapter)
+        return ChapterResponse.from_orm(created_chapter)

@@ -1,12 +1,17 @@
 from typing import List
 from sqlalchemy.orm import Session
-from src.db.models import WorldItem, NovelBible
+from src.db.world_repository import WorldItemRepository, NovelBibleRepository
+from src.api.schemas import WorldItemResponse, NovelBibleResponse
 
 class WorldService:
-    @staticmethod
-    def get_world_items(db: Session, novel_id: int) -> List[WorldItem]:
-        return db.query(WorldItem).filter(WorldItem.novel_id == novel_id).all()
+    def __init__(self, db: Session):
+        self.world_item_repository = WorldItemRepository(db)
+        self.novel_bible_repository = NovelBibleRepository(db)
 
-    @staticmethod
-    def get_bible_entries(db: Session, novel_id: int) -> List[NovelBible]:
-        return db.query(NovelBible).filter(NovelBible.novel_id == novel_id).all()
+    def get_world_items(self, novel_id: int) -> List[WorldItemResponse]:
+        items = self.world_item_repository.get_by_novel_id(novel_id)
+        return [WorldItemResponse.from_orm(item) for item in items]
+
+    def get_bible_entries(self, novel_id: int) -> List[NovelBibleResponse]:
+        entries = self.novel_bible_repository.get_by_novel_id(novel_id)
+        return [NovelBibleResponse.from_orm(entry) for entry in entries]

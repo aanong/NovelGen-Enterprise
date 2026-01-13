@@ -2,6 +2,23 @@ from pydantic import BaseModel
 from typing import List, Optional, Any
 from datetime import datetime
 
+class NovelBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    author: Optional[str] = None
+
+class NovelCreate(NovelBase):
+    pass
+
+class NovelResponse(NovelBase):
+    id: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
 class ChapterBase(BaseModel):
     title: Optional[str] = None
     chapter_number: int
@@ -26,6 +43,9 @@ class CharacterBase(BaseModel):
     role: Optional[str] = None
     current_mood: Optional[str] = None
 
+class CharacterCreate(CharacterBase):
+    novel_id: int
+
 class CharacterResponse(CharacterBase):
     id: int
     personality_traits: Optional[Any] = None
@@ -41,6 +61,10 @@ class OutlineBase(BaseModel):
     scene_description: Optional[str] = None
     status: str = "pending"
 
+class OutlineCreate(OutlineBase):
+    novel_id: int
+    branch_id: str = "main"
+
 class OutlineResponse(OutlineBase):
     id: int
     branch_id: str
@@ -48,12 +72,17 @@ class OutlineResponse(OutlineBase):
     class Config:
         orm_mode = True
 
-class RelationshipResponse(BaseModel):
-    id: int
+class RelationshipBase(BaseModel):
     char_a_id: int
     char_b_id: int
     relation_type: str
-    intimacy: float
+    intimacy: float = 0.0
+
+class RelationshipCreate(RelationshipBase):
+    pass
+
+class RelationshipResponse(RelationshipBase):
+    id: int
     
     class Config:
         orm_mode = True

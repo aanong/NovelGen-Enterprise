@@ -9,9 +9,10 @@ router = APIRouter()
 
 @router.get("/items", response_model=List[WorldItemResponse])
 def read_world_items(novel_id: int, db: Session = Depends(get_db)):
-    return WorldService.get_world_items(db, novel_id)
+    world_service = WorldService(db)
+    return world_service.get_world_items(novel_id)
 
 @router.get("/bible", response_model=List[NovelBibleResponse])
 def read_bible_entries(novel_id: int, db: Session = Depends(get_db)):
-    return WorldService.get_bible_entries(db, novel_id)
-
+    world_service = WorldService(db)
+    return world_service.get_bible_entries(novel_id)
