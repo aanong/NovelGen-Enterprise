@@ -29,13 +29,37 @@ class VectorStore:
         v2 = np.array(v2)
         return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
-    async def search_references(self, query: str, top_k: int = 3, category: Optional[str] = None) -> List[Dict[str, Any]]:
-        """搜索通用参考资料"""
+    async def search_references(
+        self, 
+        query: str, 
+        top_k: int = 3, 
+        category: Optional[str] = None,
+        novel_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        搜索通用参考资料
+        
+        Args:
+            query: 查询文本
+            top_k: 返回结果数量
+            category: 分类过滤（world_setting, plot_trope, character_archetype, style）
+            novel_id: 小说ID，如果提供则优先搜索该小说的资料库，同时也会搜索全局资料库
+        """
         query_vector = get_embedding(query)
         
         filters = []
         if category:
             filters.append(ReferenceMaterial.category == category)
+        
+        # 如果指定了 novel_id，优先搜索该小说的资料库，同时包含全局资料库
+        if novel_id is not None:
+            # 优先搜索该小说的资料库，然后搜索全局资料库（novel_id is None）
+            # 使用 OR 条件：novel_id == novel_id OR novel_id IS NULL
+            from sqlalchemy import or_
+            filters.append(or_(
+                ReferenceMaterial.novel_id == novel_id,
+                ReferenceMaterial.novel_id.is_(None)
+            ))
             
         if self.has_pgvector:
             try:
@@ -51,7 +75,8 @@ class VectorStore:
                     "title": item.title,
                     "content": item.content,
                     "source": item.source,
-                    "category": item.category
+                    "category": item.category,
+                    "novel_id": item.novel_id
                 } for item in items]
             except Exception as e:
                 print(f"Native vector search failed (References): {e}")
@@ -67,7 +92,9 @@ class VectorStore:
             for item in all_items:
                 if item.embedding:
                     sim = self._cosine_similarity(query_vector, item.embedding)
-                    results.append((sim, item))
+                    # 优先显示小说专属资料库（novel_id 不为 None）
+                    priority = 1.0 if item.novel_id else 0.5
+                    results.append((sim * priority, item))
             
             results.sort(key=lambda x: x[0], reverse=True)
             
@@ -76,6 +103,7 @@ class VectorStore:
                 "content": item.content,
                 "source": item.source,
                 "category": item.category,
+                "novel_id": item.novel_id,
                 "score": float(score)
             } for score, item in results[:top_k]]
         except Exception as e:

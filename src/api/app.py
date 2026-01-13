@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
-from src.api.routes import chapters, characters, generation, outlines, novels, relationships, world
+from src.api.routes import chapters, characters, generation, outlines, novels, relationships, world, references
 
 app = FastAPI(
     title="NovelGen-Enterprise API",
@@ -28,6 +28,7 @@ app.include_router(outlines.router, prefix="/api/outlines", tags=["outlines"])
 app.include_router(generation.router, prefix="/api/generate", tags=["generation"])
 app.include_router(relationships.router, prefix="/api/relationships", tags=["relationships"])
 app.include_router(world.router, prefix="/api/world", tags=["world"])
+app.include_router(references.router, prefix="/api", tags=["references"])
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

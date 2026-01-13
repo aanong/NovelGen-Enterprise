@@ -22,6 +22,7 @@ class Novel(Base):
     outlines = relationship("PlotOutline", back_populates="novel", cascade="all, delete-orphan")
     bible_entries = relationship("NovelBible", back_populates="novel", cascade="all, delete-orphan")
     world_items = relationship("WorldItem", back_populates="novel", cascade="all, delete-orphan")
+    reference_materials = relationship("ReferenceMaterial", foreign_keys="ReferenceMaterial.novel_id", cascade="all, delete-orphan")
 
 class StyleRef(Base):
     __tablename__ = "style_ref"
@@ -47,7 +48,14 @@ class ReferenceMaterial(Base):
     category = Column(String(100), index=True) # 分类：world_setting(世界观), plot_trope(剧情), character_archetype(人物原型), style(文风)
     tags = Column(JSON)                     # 标签列表
     
+    # 可选：关联特定小说，为空则为全局通用资料库
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=True, index=True)
+    
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_novel_category', 'novel_id', 'category'),  # 优化按小说和分类查询
+    )
 
 class NovelBible(Base):
     """世界观/设定集 (Novel Bible)"""
