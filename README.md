@@ -11,6 +11,14 @@
 
 ---
 
+## 项目状态
+
+**当前状态:** 活跃开发中
+
+该项目正在积极开发中。API 和数据库模式可能会在未来的版本中发生变化。我们欢迎社区的贡献和反馈！
+
+---
+
 ## 📋 目录
 
 - [核心特性](#-核心特性)
@@ -29,6 +37,7 @@
   - [API 接口](#2-api-接口)
   - [Web 界面](#3-web-界面)
 - [项目结构](#-项目结构)
+- [待办事项](#-待办事项)
 - [常见问题](#-常见问题)
 - [开发指南](#-开发指南)
 - [贡献指南](#-贡献指南)
@@ -106,24 +115,36 @@ git clone https://github.com/your-org/NovelGen-Enterprise.git
 cd NovelGen-Enterprise
 docker-compose up -d
 ```
+这将自动构建镜像并启动所有服务，包括数据库。
 
 ### 方式二：本地开发环境搭建
 
 1.  **创建虚拟环境**:
     ```bash
-    python -m venv venv
-    source venv/bin/activate  # Windows: venv\Scripts\activate
+    python -m venv .venv
+    source .venv/bin/activate  # Windows: .venv\Scripts\activate
     ```
 2.  **安装依赖**:
     ```bash
     pip install -r requirements.txt
     ```
 3.  **配置环境变量**:
-    复制 `.env.example` 到 `.env` 并填入 Key。
-4.  **启动服务**:
+    复制 `.env.example` 到 `.env` 并填入您的 API 密钥和数据库连接信息。
+4.  **初始化数据库**:
+    ```bash
+    # 在运行 API 或 worker 之前，请确保数据库已创建
+    # 您可以使用任何 PostgreSQL 客户端来创建数据库
+    # 然后运行迁移
+    alembic upgrade head
+    ```
+5.  **启动服务**:
+    在 **第一个终端** 中，启动 FastAPI 应用:
     ```bash
     uvicorn src.main:app --reload
-    celery -A src.worker worker --loglevel=info
+    ```
+    在 **第二个终端** 中，启动 Celery worker:
+    ```bash
+    celery -A src.worker.celery_app worker --loglevel=info
     ```
 
 ---
@@ -147,17 +168,101 @@ python -m src.scripts.manage_references import data/refs.json --force
 
 ---
 
-## 📝 开发指南
+## 📝 使用指南
 
-### 代码结构
-- `src/agents/`: Agent 实现 (Writer, Reviewer, etc.)，均继承自 `BaseAgent`。
-- `src/nodes/`: LangGraph 节点实现，解耦工作流逻辑。
-- `src/services/`: 业务逻辑层，封装数据库与任务队列操作。
-- `src/api/`: FastAPI 路由定义，调用 Service 层。
-- `src/db/`: 数据库模型与 VectorStore。
+### 1. 命令行工具 (CLI)
+
+项目提供了一个强大的 CLI 来与 NGE 交互。
+
+**初始化小说:**
+```bash
+python -m src.main init "path/to/your/novel_setting.md" --title "我的第一本小说"
+```
+
+**运行生成任务:**
+```bash
+python -m src.main run --novel-id 1
+```
+
+### 2. API 接口
+
+您可以使用任何 HTTP 客户端与 API 交互。
+
+**创建一本新小说:**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/novels/" \
+-H "Content-Type: application/json" \
+-d '{
+  "title": "来自 API 的小说",
+  "author": "API 用户",
+  "description": "这是一个通过 API 创建的小说"
+}'
+```
+
+**获取小说列表:**
+```bash
+curl -X GET "http://127.0.0.1:8000/api/novels/"
+```
+
+### 3. Web 界面
+
+访问 `http://127.0.0.1:8000/` 以使用基于 Vue.js 的前端仪表板。
+
+---
+
+## 项目结构
+
+- `src/`
+  - `agents/`: 包含所有 Agent 的实现 (e.g., `WriterAgent`, `ReviewerAgent`)。每个 Agent 都继承自 `BaseAgent`。
+  - `api/`: FastAPI 路由定义。将 HTTP 请求转换为服务层调用。
+  - `db/`: 数据库模型 (SQLAlchemy)、仓储和迁移 (Alembic)。
+  - `graph/`: LangGraph 的状态和图定义。
+  - `nodes/`: LangGraph 图中的每个节点的实现。
+  - `schemas/`: Pydantic 模型，用于 API 请求/响应验证和数据传输。
+  - `scripts/`: 用于数据导入/导出、数据库管理等的独立脚本。
+  - `services/`: 业务逻辑层。封装了数据库操作和任务调度。
+  - `worker/`: Celery worker 的配置和任务定义。
+- `main.py`: 项目的入口点，包括 CLI 和 FastAPI 应用的启动。
+- `config.py`: 集中式配置管理。
+
+---
+
+## 待办事项
+
+- [ ] **增强 Web 界面:** 添加更多用于编辑和可视化小说数据的功能。
+- [ ] **支持更多的 LLM:** 集成除 Gemini 和 DeepSeek 之外的其他模型。
+- [ ] **更复杂的 Agent 交互:** 实现更动态的 Agent 间通信和协作。
+- [ ] **性能优化:** 进一步优化数据库查询和 LLM 调用。
+- [ ] **全面的单元和集成测试:** 提高代码覆盖率。
+
+---
+
+## 常见问题
+
+**(待补充)**
+
+---
+
+## 开发指南
+
+### 代码风格
+
+本项目使用 `black` 进行代码格式化，使用 `isort` 进行导入排序。请在提交代码前运行这些工具。
 
 ### 验证与测试
 运行优化验证脚本：
 ```bash
 python src/scripts/verify_optimization.py
 ```
+
+---
+
+## 贡献指南
+
+我们欢迎任何形式的贡献！请随时提出 issue 或提交 pull request。
+
+---
+
+## 许可证
+
+本项目根据 [MIT 许可证](LICENSE) 授权。

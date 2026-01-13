@@ -5,20 +5,24 @@ from src.utils import get_embedding
 
 class ReferenceService:
     @staticmethod
-    def add_reference(db: Session, novel_id: int, data: Dict[str, Any]) -> ReferenceMaterial:
-        # Check novel existence
-        novel = db.query(Novel).filter(Novel.id == novel_id).first()
-        if not novel:
-            raise ValueError(f"Novel with ID {novel_id} not found")
+    def add_reference(db: Session, novel_id: Optional[int], data: Dict[str, Any]) -> ReferenceMaterial:
+        # Check novel existence if novel_id is provided
+        if novel_id is not None:
+            novel = db.query(Novel).filter(Novel.id == novel_id).first()
+            if not novel:
+                raise ValueError(f"Novel with ID {novel_id} not found")
         
         # Check duplicate
-        existing = db.query(ReferenceMaterial).filter(
-            ReferenceMaterial.novel_id == novel_id,
-            ReferenceMaterial.title == data["title"]
-        ).first()
+        query = db.query(ReferenceMaterial).filter(ReferenceMaterial.title == data["title"])
+        if novel_id is not None:
+            query = query.filter(ReferenceMaterial.novel_id == novel_id)
+        else:
+            query = query.filter(ReferenceMaterial.novel_id.is_(None))
+            
+        existing = query.first()
         
         if existing:
-            raise ValueError(f"Reference material with title '{data['title']}' already exists for this novel")
+            raise ValueError(f"Reference material with title '{data['title']}' already exists")
         
         # Generate embedding
         try:
@@ -43,21 +47,25 @@ class ReferenceService:
         return ref_material
 
     @staticmethod
-    def batch_add_references(db: Session, novel_id: int, references: List[Dict[str, Any]]) -> Dict[str, Any]:
-        # Check novel existence
-        novel = db.query(Novel).filter(Novel.id == novel_id).first()
-        if not novel:
-            raise ValueError(f"Novel with ID {novel_id} not found")
+    def batch_add_references(db: Session, novel_id: Optional[int], references: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # Check novel existence if novel_id is provided
+        if novel_id is not None:
+            novel = db.query(Novel).filter(Novel.id == novel_id).first()
+            if not novel:
+                raise ValueError(f"Novel with ID {novel_id} not found")
         
         created_refs = []
         errors = []
         
         for ref_data in references:
             # Check duplicate
-            existing = db.query(ReferenceMaterial).filter(
-                ReferenceMaterial.novel_id == novel_id,
-                ReferenceMaterial.title == ref_data["title"]
-            ).first()
+            query = db.query(ReferenceMaterial).filter(ReferenceMaterial.title == ref_data["title"])
+            if novel_id is not None:
+                query = query.filter(ReferenceMaterial.novel_id == novel_id)
+            else:
+                query = query.filter(ReferenceMaterial.novel_id.is_(None))
+                
+            existing = query.first()
             
             if existing:
                 errors.append(f"'{ref_data['title']}' already exists")
