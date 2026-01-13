@@ -1,0 +1,16 @@
+[
+    {
+        "title": "测试资料1",
+        "content": "这是一条测试参考资料，用于验证导入功能。",
+        "source": "测试脚本",
+        "category": "test",
+        "tags": ["测试", "示例"]
+    },
+    {
+        "title": "魔法系统设定",
+        "content": "魔法分为元素魔法、精神魔法和空间魔法三大类。",
+        "source": "奇幻设定集",
+        "category": "world_setting",
+        "tags": ["魔法", "奇幻"]
+    }
+]
