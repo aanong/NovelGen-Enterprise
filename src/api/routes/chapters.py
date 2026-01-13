@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from src.api.deps import get_db
-from src.db.models import Chapter
 from src.api.schemas import ChapterResponse
+from src.services.chapter_service import ChapterService
 
 router = APIRouter()
 
@@ -15,15 +15,12 @@ def read_chapters(
     branch_id: str = "main",
     db: Session = Depends(get_db)
 ):
-    chapters = db.query(Chapter).filter(
-        Chapter.novel_id == novel_id,
-        Chapter.branch_id == branch_id
-    ).order_by(Chapter.chapter_number).offset(skip).limit(limit).all()
-    return chapters
+    return ChapterService.get_chapters(db, novel_id, branch_id, skip, limit)
 
 @router.get("/{chapter_id}", response_model=ChapterResponse)
 def read_chapter(chapter_id: int, db: Session = Depends(get_db)):
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter = ChapterService.get_chapter(db, chapter_id)
     if chapter is None:
         raise HTTPException(status_code=404, detail="Chapter not found")
     return chapter
+

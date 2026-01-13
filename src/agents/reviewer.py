@@ -7,29 +7,33 @@ from langchain_core.prompts import ChatPromptTemplate
 from ..schemas.state import NGEState, CharacterState
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, validate_character_consistency, normalize_llm_content
+from .base import BaseAgent
 from dotenv import load_dotenv
 
 load_dotenv()
 
-class ReviewerAgent:
+class ReviewerAgent(BaseAgent):
     """
     Reviewer Agent (Gemini): 负责逻辑审查、人物OOC检查及状态演化。
     作为【王】进行最后的裁决。
     遵循 Rule 1.1 / 2.2: 逻辑与一致性守门人
     """
-    def __init__(self):
-        if Config.model.GEMINI_MODEL == "mock":
-            from ..utils import MockChatModel
-            self.llm = MockChatModel(responses=[
+    def __init__(self, temperature: float = None):
+        super().__init__(
+            model_name="gemini",
+            temperature=temperature or Config.model.DEEPSEEK_REVIEWER_TEMP,
+            mock_responses=[
                 # Response for review_draft
                 json.dumps({"passed": True, "score": 0.9, "feedback": "Good job", "logical_errors": []}),
-            ])
-        else:
-            self.llm = ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
-            )
+            ]
+        )
+
+    async def process(self, state: NGEState, draft: str) -> Dict[str, Any]:
+        """
+        BaseAgent required method.
+        Delegates to review_draft.
+        """
+        return await self.review_draft(state, draft)
 
     async def review_draft(self, state: NGEState, draft: str) -> Dict[str, Any]:
         """

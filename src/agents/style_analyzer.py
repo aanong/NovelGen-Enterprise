@@ -1,30 +1,27 @@
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from ..schemas.style import StyleFeatures
 from ..config import Config
+from .base import BaseAgent
+from typing import Optional, Any
 from dotenv import load_dotenv
 
 load_dotenv()
 
-class StyleAnalyzer:
+class StyleAnalyzer(BaseAgent):
     """
     文风分析 Agent，负责从参考文本中提取句式、修辞、节奏等特征。
     使用 Gemini 模型进行深度语义与风格分析。
     """
-    def __init__(self):
-        if Config.model.GEMINI_MODEL == "mock":
-            from ..utils import MockChatModel
-            self.llm = MockChatModel(responses=[
+    def __init__(self, temperature: Optional[float] = None):
+        super().__init__(
+            model_name="gemini",
+            temperature=temperature or 0.2,
+            mock_responses=[
                 '{"tone": "Dark", "rhetoric": ["Metaphor"], "keywords": ["Shadow"], "example_sentence": "Darkness fell."}'
-            ])
-        else:
-            self.llm = ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                temperature=0.2,
-                google_api_key=os.getenv("GOOGLE_API_KEY")
-            )
+            ]
+        )
         self.parser = PydanticOutputParser(pydantic_object=StyleFeatures)
         
         self.prompt = ChatPromptTemplate.from_messages([
@@ -43,6 +40,13 @@ class StyleAnalyzer:
             )),
             ("human", "请分析以下文本的文风特征：\n\n{text}")
         ])
+
+    async def process(self, text: str) -> StyleFeatures:
+        """
+        BaseAgent required method.
+        Delegates to analyze.
+        """
+        return await self.analyze(text)
 
     async def analyze(self, text: str) -> StyleFeatures:
         """

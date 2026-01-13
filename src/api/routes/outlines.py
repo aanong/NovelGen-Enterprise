@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from src.api.deps import get_db
-from src.db.models import PlotOutline
 from src.api.schemas import OutlineResponse
+from src.services.outline_service import OutlineService
 
 router = APIRouter()
 
@@ -15,8 +15,5 @@ def read_outlines(
     branch_id: str = "main",
     db: Session = Depends(get_db)
 ):
-    outlines = db.query(PlotOutline).filter(
-        PlotOutline.novel_id == novel_id,
-        PlotOutline.branch_id == branch_id
-    ).order_by(PlotOutline.chapter_number).offset(skip).limit(limit).all()
-    return outlines
+    return OutlineService.get_outlines(db, novel_id, branch_id, skip, limit)
+

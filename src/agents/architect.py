@@ -1,8 +1,7 @@
 import os
 import re
 import json
-from typing import List, Dict, Any
-from langchain_google_genai import ChatGoogleGenerativeAI
+from typing import List, Dict, Any, Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -10,6 +9,7 @@ from ..schemas.state import PlotPoint, NGEState
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from ..db.vector_store import VectorStore
+from .base import BaseAgent
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,17 +33,17 @@ class ChapterOutline(BaseModel):
 class FullNovelOutline(BaseModel):
     chapters: List[ChapterOutline] = Field(description="全书分章大纲列表")
 
-class ArchitectAgent:
+class ArchitectAgent(BaseAgent):
     """
     Architect Agent (Gemini): 负责剧情逻辑、大纲构建与拆解。
     利用 Gemini 的逻辑推演能力，确保世界观一致性。
     遵循 Rule 1.1: Gemini 为王（底层逻辑最终解释权）
     """
-    def __init__(self):
-        # 使用配置文件中的设置
-        if Config.model.GEMINI_MODEL == "mock":
-            from ..utils import MockChatModel
-            self.llm = MockChatModel(responses=[
+    def __init__(self, temperature: Optional[float] = None):
+        super().__init__(
+            model_name="gemini",
+            temperature=temperature or Config.model.GEMINI_TEMPERATURE,
+            mock_responses=[
                 # Response for generate_chapter_outlines
                 json.dumps({"chapters": [
                     {"chapter_number": 1, "title": "Ch1", "scene_description": "Scene 1", "key_conflict": "Conflict 1", "foreshadowing": []},
@@ -54,17 +54,19 @@ class ArchitectAgent:
                 json.dumps({"thinking": "Think", "scene_description": "Scene", "key_conflict": "Conflict", "instruction": "Write"}),
                 # More responses if needed
                 json.dumps({"thinking": "Think", "scene_description": "Scene", "key_conflict": "Conflict", "instruction": "Write"}),
-            ])
-        else:
-            self.llm = ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=Config.model.GEMINI_TEMPERATURE
-            )
+            ]
+        )
         self.outline_parser = PydanticOutputParser(pydantic_object=OutlineExpansion)
         self.plan_parser = PydanticOutputParser(pydantic_object=ChapterPlan)
         self.full_outline_parser = PydanticOutputParser(pydantic_object=FullNovelOutline)
         self.vector_store = VectorStore()
+
+    async def process(self, state: NGEState, **kwargs) -> Dict[str, Any]:
+        """
+        BaseAgent required method.
+        Delegates to plan_next_chapter for the main workflow.
+        """
+        return await self.plan_next_chapter(state)
 
     async def generate_chapter_outlines(self, synopsis: str, world_view: str, total_chapters: int = 10) -> List[ChapterOutline]:
         """
@@ -212,8 +214,8 @@ class ArchitectAgent:
         
         # 获取全局伏笔并进行分析
         active_threads = state.memory_context.global_foreshadowing
-        foreshadowing_analysis = self._analyze_foreshadowing(active_threads, state)
-        threads_str = self._format_foreshadowing_for_planning(active_threads, foreshadowing_analysis)
+        # foreshadowing_analysis = self._analyze_foreshadowing(active_threads, state)
+        threads_str = self._format_foreshadowing_for_planning(active_threads, None)
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
@@ -279,3 +281,19 @@ class ArchitectAgent:
                 "conflict": "未知冲突",
                 "instruction": f"请继续写下一章。基于剧情点：{current_point_info}"
             }
+
+    def _format_foreshadowing_for_planning(self, threads: List[str], analysis: Any) -> str:
+        """
+        格式化伏笔信息用于 Prompt
+        """
+        if not threads:
+            return "【未回收伏笔】：无"
+        
+        formatted = "【未回收伏笔/悬念】：\n"
+        for i, t in enumerate(threads, 1):
+            formatted += f"{i}. {t}\n"
+        
+        if analysis:
+             formatted += f"\n伏笔分析建议：{str(analysis)}\n"
+             
+        return formatted

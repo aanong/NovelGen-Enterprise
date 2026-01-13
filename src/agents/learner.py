@@ -60,16 +60,16 @@ class NovelSetupData(BaseModel):
 
 # --- Learner Agent Implementation ---
 
-class LearnerAgent:
+class LearnerAgent(BaseAgent):
     """
     LearnerAgent: 负责从非结构化文本中提取结构化的小说设定。
     使用 Deepseek (逻辑推理强) 来进行理解和拆解。
     """
-    def __init__(self):
-        from ..config import Config
-        if Config.model.GEMINI_MODEL == "mock":
-            from ..utils import MockChatModel
-            self.llm = MockChatModel(responses=[
+    def __init__(self, temperature: Optional[float] = None):
+        super().__init__(
+            model_name="gemini",
+            temperature=temperature or Config.model.DEEPSEEK_REVIEWER_TEMP,
+            mock_responses=[
                 json.dumps({
                     "world_view_items": [{"category": "World", "key": "System", "content": "Magic"}], 
                     "characters": [{"name": "MockChar", "role": "Protagonist", "personality": "Brave", "background": "None", "relationship_summary": "None", "skills": [], "assets": {}}], 
@@ -77,15 +77,17 @@ class LearnerAgent:
                     "outlines": [{"chapter_number": 1, "title": "Ch1", "scene_description": "Scene 1", "key_conflict": "Conflict 1", "instruction": "Write Ch1"}], 
                     "style": {"tone": "Mock", "rhetoric": [], "keywords": [], "example_sentence": "Mock"}
                 })
-            ])
-        else:
-            self.llm = ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=Config.model.DEEPSEEK_REVIEWER_TEMP
-            )
+            ]
+        )
         self.parser = PydanticOutputParser(pydantic_object=NovelSetupData)
         self.db: Session = SessionLocal()
+
+    async def process(self, *args, **kwargs) -> Any:
+        """
+        BaseAgent required method.
+        Not primarily used in current flow, but required for consistency.
+        """
+        pass # LearnerAgent usually called via specific methods
 
     def __del__(self):
         if hasattr(self, 'db'):

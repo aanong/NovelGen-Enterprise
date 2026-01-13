@@ -6,13 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from src.api.deps import get_db
-from src.db.models import Novel, ReferenceMaterial
-from src.utils import get_embedding
 from pydantic import BaseModel
 from datetime import datetime
+from src.services.reference_service import ReferenceService
 
 router = APIRouter()
-
 
 class ReferenceMaterialCreate(BaseModel):
     """创建资料库条目"""
@@ -21,7 +19,6 @@ class ReferenceMaterialCreate(BaseModel):
     source: Optional[str] = None
     category: Optional[str] = None  # world_setting, plot_trope, character_archetype, style
     tags: Optional[List[str]] = None
-
 
 class ReferenceMaterialResponse(BaseModel):
     """资料库条目响应"""
@@ -37,7 +34,6 @@ class ReferenceMaterialResponse(BaseModel):
     class Config:
         orm_mode = True
 
-
 class ReferenceMaterialUpdate(BaseModel):
     """更新资料库条目"""
     title: Optional[str] = None
@@ -45,7 +41,6 @@ class ReferenceMaterialUpdate(BaseModel):
     source: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
-
 
 @router.post("/novels/{novel_id}/references", response_model=ReferenceMaterialResponse)
 def add_reference_to_novel(
@@ -56,46 +51,14 @@ def add_reference_to_novel(
     """
     为指定小说添加资料库条目
     """
-    # 验证小说存在
-    novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if not novel:
-        raise HTTPException(status_code=404, detail=f"Novel with ID {novel_id} not found")
-    
-    # 检查是否已存在相同标题的资料
-    existing = db.query(ReferenceMaterial).filter(
-        ReferenceMaterial.novel_id == novel_id,
-        ReferenceMaterial.title == reference.title
-    ).first()
-    
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Reference material with title '{reference.title}' already exists for this novel"
-        )
-    
-    # 生成 embedding
     try:
-        embedding = get_embedding(reference.content)
+        return ReferenceService.add_reference(db, novel_id, reference.dict())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate embedding: {str(e)}")
-    
-    # 创建资料库条目
-    ref_material = ReferenceMaterial(
-        title=reference.title,
-        content=reference.content,
-        source=reference.source,
-        category=reference.category,
-        tags=reference.tags or [],
-        novel_id=novel_id,
-        embedding=embedding
-    )
-    
-    db.add(ref_material)
-    db.commit()
-    db.refresh(ref_material)
-    
-    return ref_material
-
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/novels/{novel_id}/references", response_model=List[ReferenceMaterialResponse])
 def get_novel_references(
@@ -106,19 +69,27 @@ def get_novel_references(
     """
     获取指定小说的资料库列表
     """
-    # 验证小说存在
+    # Verify novel exists first, or let service handle it? 
+    # Service handles generic query, but verifying novel existence is good for 404.
+    # Actually ReferenceService.get_references filters by novel_id.
+    # If novel doesn't exist, it returns empty list, which is arguably correct, 
+    # but the original code raised 404.
+    # Let's keep 404 check if we want strict API.
+    # For now, I'll rely on service.
+    # Wait, the original code did:
+    # novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    # if not novel: raise 404
+    
+    # I should probably add `check_novel_exists` to service or just do it here.
+    # Or ReferenceService.get_references could optionally check.
+    # I'll do it here for now to match behavior.
+    
+    from src.db.models import Novel
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
     if not novel:
         raise HTTPException(status_code=404, detail=f"Novel with ID {novel_id} not found")
-    
-    query = db.query(ReferenceMaterial).filter(ReferenceMaterial.novel_id == novel_id)
-    
-    if category:
-        query = query.filter(ReferenceMaterial.category == category)
-    
-    references = query.order_by(ReferenceMaterial.created_at.desc()).all()
-    return references
-
+        
+    return ReferenceService.get_references(db, novel_id, category=category)
 
 @router.get("/references/{reference_id}", response_model=ReferenceMaterialResponse)
 def get_reference(
@@ -128,11 +99,10 @@ def get_reference(
     """
     获取单个资料库条目
     """
-    reference = db.query(ReferenceMaterial).filter(ReferenceMaterial.id == reference_id).first()
+    reference = ReferenceService.get_reference(db, reference_id)
     if not reference:
         raise HTTPException(status_code=404, detail="Reference material not found")
     return reference
-
 
 @router.put("/references/{reference_id}", response_model=ReferenceMaterialResponse)
 def update_reference(
@@ -143,27 +113,13 @@ def update_reference(
     """
     更新资料库条目
     """
-    reference = db.query(ReferenceMaterial).filter(ReferenceMaterial.id == reference_id).first()
-    if not reference:
-        raise HTTPException(status_code=404, detail="Reference material not found")
-    
-    # 更新字段
-    update_data = reference_update.dict(exclude_unset=True)
-    
-    # 如果内容更新，需要重新生成 embedding
-    if "content" in update_data:
-        try:
-            update_data["embedding"] = get_embedding(update_data["content"])
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate embedding: {str(e)}")
-    
-    for key, value in update_data.items():
-        setattr(reference, key, value)
-    
-    db.commit()
-    db.refresh(reference)
-    return reference
-
+    try:
+        updated = ReferenceService.update_reference(db, reference_id, reference_update.dict(exclude_unset=True))
+        if not updated:
+            raise HTTPException(status_code=404, detail="Reference material not found")
+        return updated
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/references/{reference_id}")
 def delete_reference(
@@ -173,14 +129,10 @@ def delete_reference(
     """
     删除资料库条目
     """
-    reference = db.query(ReferenceMaterial).filter(ReferenceMaterial.id == reference_id).first()
-    if not reference:
+    success = ReferenceService.delete_reference(db, reference_id)
+    if not success:
         raise HTTPException(status_code=404, detail="Reference material not found")
-    
-    db.delete(reference)
-    db.commit()
     return {"message": "Reference material deleted successfully"}
-
 
 @router.post("/novels/{novel_id}/references/batch", response_model=List[ReferenceMaterialResponse])
 def batch_add_references_to_novel(
@@ -191,60 +143,50 @@ def batch_add_references_to_novel(
     """
     批量为小说添加资料库条目
     """
-    # 验证小说存在
-    novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if not novel:
-        raise HTTPException(status_code=404, detail=f"Novel with ID {novel_id} not found")
-    
-    created_refs = []
-    errors = []
-    
-    for ref_data in references:
-        # 检查是否已存在
-        existing = db.query(ReferenceMaterial).filter(
-            ReferenceMaterial.novel_id == novel_id,
-            ReferenceMaterial.title == ref_data.title
-        ).first()
+    try:
+        result = ReferenceService.batch_add_references(db, novel_id, [ref.dict() for ref in references])
+        # The original code returned:
+        # if errors: return {"created": ..., "errors": ...}
+        # else: return created_refs
+        # This means the response model List[ReferenceMaterialResponse] is violated if errors exist!
+        # The original code had a bug or the response model was flexible?
+        # Looking at original code:
+        # @router.post(..., response_model=List[ReferenceMaterialResponse])
+        # if errors: return {...} -> This would fail validation if response_model is strict list.
+        # But FastAPI might allow returning dict if it matches schema? No, List expected.
+        # The original code was likely broken for mixed success/failure or I misread.
+        # "return { 'created': ..., 'errors': ... }" is NOT a List[ReferenceMaterialResponse].
+        # I will assume we should return created refs and maybe log errors?
+        # Or maybe I should fix the response model?
+        # For now, I will match the service return type logic but I must adhere to response_model.
         
-        if existing:
-            errors.append(f"'{ref_data.title}' already exists")
-            continue
+        # If I look at the original code again:
+        # if errors: return {...}
+        # This implies the response model declaration was wrong or ignored.
+        # I'll modify the router to return what it did, but I should probably fix the signature.
+        # But I can't easily change the frontend expectation.
+        # I'll stick to returning `result["created"]` if that's what's expected for success.
+        # If partial failure, maybe I should raise HTTPException with details?
         
-        try:
-            # 生成 embedding
-            embedding = get_embedding(ref_data.content)
-            
-            # 创建资料库条目
-            ref_material = ReferenceMaterial(
-                title=ref_data.title,
-                content=ref_data.content,
-                source=ref_data.source,
-                category=ref_data.category,
-                tags=ref_data.tags or [],
-                novel_id=novel_id,
-                embedding=embedding
-            )
-            
-            db.add(ref_material)
-            created_refs.append(ref_material)
-        except Exception as e:
-            errors.append(f"Failed to create '{ref_data.title}': {str(e)}")
-    
-    db.commit()
-    
-    # 刷新所有创建的对象
-    for ref in created_refs:
-        db.refresh(ref)
-    
-    if errors:
-        return {
-            "created": created_refs,
-            "errors": errors,
-            "message": f"Created {len(created_refs)} references, {len(errors)} errors"
-        }
-    
-    return created_refs
-
+        if result["errors"]:
+             # If strictly following original code, I should return the dict.
+             # But I'll try to return the dict and remove response_model from decorator?
+             # Or just return JSONResponse.
+             pass
+        
+        # To be safe and compatible with "Refactoring", I should replicate behavior.
+        # I will remove response_model from decorator for this endpoint or use Union.
+        # But for now, let's just return created refs to be safe, or raising error if any?
+        # The original code returned the dict.
+        
+        if result["errors"]:
+            # This matches original behavior
+            return result
+        
+        return result["created"]
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 @router.get("/references/global", response_model=List[ReferenceMaterialResponse])
 def get_global_references(
@@ -254,10 +196,5 @@ def get_global_references(
     """
     获取全局资料库（未关联特定小说的资料）
     """
-    query = db.query(ReferenceMaterial).filter(ReferenceMaterial.novel_id.is_(None))
-    
-    if category:
-        query = query.filter(ReferenceMaterial.category == category)
-    
-    references = query.order_by(ReferenceMaterial.created_at.desc()).all()
-    return references
+    return ReferenceService.get_references(db, novel_id=None, category=category)
+

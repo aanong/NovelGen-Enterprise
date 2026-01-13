@@ -26,14 +26,29 @@ class EvolutionResult(BaseModel):
     evolutions: List[CharacterEvolution]
     story_updates: Optional[PlotUpdate] = None
 
-class CharacterEvolver:
+class CharacterEvolver(BaseAgent):
     """
     负责在章节结束后，根据内容分析人物状态的演化及剧情推进。
     遵循 Antigravity Rule 3.2 (人物立体与成长) 及 Rule 3.4 (伏笔回收).
     """
-    def __init__(self):
-        # 使用配置中的逻辑模型（通常是 deepseek）
-        self.llm = get_llm(model_name="deepseek") # 使用逻辑模型进行分析
+    def __init__(self, temperature: Optional[float] = None):
+        super().__init__(
+            model_name="deepseek", # 使用逻辑模型进行分析
+            temperature=temperature,
+            mock_responses=[
+                json.dumps({
+                    "evolutions": [],
+                    "story_updates": {"new_foreshadowing": [], "resolved_threads": []}
+                })
+            ]
+        )
+
+    async def process(self, state: NGEState) -> Any:
+        """
+        BaseAgent required method.
+        Delegates to evolve.
+        """
+        return await self.evolve(state)
 
     async def evolve(self, state: NGEState) -> EvolutionResult:
         """
