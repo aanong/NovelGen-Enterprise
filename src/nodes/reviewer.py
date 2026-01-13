@@ -3,7 +3,7 @@ from datetime import datetime
 from ..schemas.state import NGEState
 from ..agents.constants import NodeAction, ReviewDecision
 from ..db.base import SessionLocal
-from ..db.models import LogicAudit
+from ..db.models import LogicAudit, PlotOutline
 from ..agents.reviewer import ReviewerAgent
 from ..utils import normalize_llm_content, strip_think_tags
 from ..config import Config
@@ -17,7 +17,24 @@ class ReviewNode(BaseNode):
         print("--- REVIEWING DRAFT ---")
         db = SessionLocal()
         try:
-            review_result = await self.reviewer.review_draft(state, state.current_draft)
+            # 获取当前章节的大纲信息用于遵循度检查
+            current_chapter_num = state.current_plot_index + 1
+            outline = db.query(PlotOutline).filter_by(
+                novel_id=state.current_novel_id,
+                branch_id=state.current_branch,
+                chapter_number=current_chapter_num
+            ).first()
+            
+            outline_info = {
+                "scene": outline.scene_description if outline else "未定义场景",
+                "conflict": outline.key_conflict if outline else "未定义冲突"
+            }
+            
+            review_result = await self.reviewer.review_draft(
+                state, 
+                state.current_draft,
+                outline_info=outline_info
+            )
             
             audit = LogicAudit(
                 reviewer_role="Deepseek-Critic",

@@ -193,7 +193,8 @@ class EvolveNode(BaseNode):
                     state,
                     state.current_draft
                 )
-                chapter_entry.summary = summary_result.get("summary", state.current_draft[:200])
+                # 存储完整的结构化摘要 JSON
+                chapter_entry.summary = json.dumps(summary_result, ensure_ascii=False)
                 
                 # 提取新伏笔并添加到全局伏笔列表
                 new_foreshadowing = summary_result.get("new_foreshadowing", [])
@@ -201,6 +202,18 @@ class EvolveNode(BaseNode):
                     if f and f not in state.memory_context.global_foreshadowing:
                         state.memory_context.global_foreshadowing.append(f)
                         print(f"📖 从摘要中提取新伏笔: {f}")
+
+                # 处理已解决的伏笔
+                resolved_threads = summary_result.get("resolved_threads", [])
+                if resolved_threads:
+                    original_threads = list(state.memory_context.global_foreshadowing)
+                    for resolved in resolved_threads:
+                        for existing in original_threads:
+                            # 模糊匹配或包含匹配
+                            if existing in resolved or resolved in existing:
+                                if existing in state.memory_context.global_foreshadowing:
+                                    state.memory_context.global_foreshadowing.remove(existing)
+                                    print(f"✅ 从摘要中确认已解决伏笔: {existing}")
             except Exception as e:
                 logger.error(f"摘要生成失败，使用回退方案: {e}", exc_info=True)
                 # 回退到简单摘要

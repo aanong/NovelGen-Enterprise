@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import re
 from typing import Dict, Any, List
 from ..schemas.state import NGEState
 from ..agents.constants import NodeAction
@@ -99,22 +100,43 @@ class RefineContextNode(BaseNode):
         """构建更精准的 RAG 查询"""
         query_parts = []
         
-        # 从 review_feedback 中提取场景和冲突信息
+        # 1. 从规划指令中提取核心信息
         if state.review_feedback:
-            query_parts.append(state.review_feedback[:200])  # 限制长度
+            # 尝试提取 Scene 和 Conflict
+            instruction = state.review_feedback
+            scene_match = re.search(r"Scene: (.*?)(?:\n|$)", instruction)
+            conflict_match = re.search(r"Conflict: (.*?)(?:\n|$)", instruction)
+            
+            if scene_match:
+                query_parts.append(scene_match.group(1))
+            if conflict_match:
+                query_parts.append(conflict_match.group(1))
+            
+            # 如果没匹配到，取前 200 字
+            if not scene_match and not conflict_match:
+                query_parts.append(instruction[:200])
         
-        # 添加当前剧情点信息
+        # 2. 添加当前剧情大纲点
         if state.current_plot_index < len(state.plot_progress):
             plot_point = state.plot_progress[state.current_plot_index]
-            query_parts.append(plot_point.title)
-            query_parts.append(plot_point.description[:100])
+            query_parts.append(getattr(plot_point, "title", ""))
+            query_parts.append(getattr(plot_point, "description", "")[:100])
         
-        # 添加涉及的主要人物
+        # 3. 添加涉及的主要人物及当前状态
         if state.characters:
-            main_chars = [name for name, char in list(state.characters.items())[:3] 
-                         if char.current_mood]
-            if main_chars:
-                query_parts.append(" ".join(main_chars))
+            for name, char in list(state.characters.items())[:3]:
+                if char.current_mood:
+                    query_parts.append(f"{name} {char.current_mood}")
+                # 添加重要物品
+                if char.inventory:
+                    items = [getattr(i, 'name', str(i)) for i in char.inventory[:2]]
+                    query_parts.append(" ".join(items))
+        
+        # 4. 添加全局未回收伏笔
+        if state.memory_context.global_foreshadowing:
+            # 取最近两条伏笔增加检索相关性
+            threads = state.memory_context.global_foreshadowing[-2:]
+            query_parts.append(" ".join(threads))
         
         return " ".join([p for p in query_parts if p])
     

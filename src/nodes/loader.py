@@ -78,6 +78,7 @@ class LoadContextNode(BaseNode):
             
             # 3. Rule 3.1: 加载历史摘要 (链表回溯)
             summaries = []
+            key_events = []
             
             # 确定回溯起点
             start_chapter_id = state.last_chapter_id
@@ -100,12 +101,30 @@ class LoadContextNode(BaseNode):
                 ch = db.query(DBChapter).filter(DBChapter.id == curr_id).first()
                 if ch:
                     if ch.summary:
-                        summaries.insert(0, ch.summary) # 插入到开头，保持时间顺序
+                        # 尝试解析结构化摘要
+                        try:
+                            import json
+                            summary_data = json.loads(ch.summary)
+                            if isinstance(summary_data, dict):
+                                summaries.insert(0, summary_data.get("summary", ""))
+                                if "key_events" in summary_data:
+                                    key_events.extend(summary_data["key_events"])
+                            else:
+                                summaries.insert(0, str(ch.summary))
+                        except:
+                            summaries.insert(0, ch.summary) # 插入到开头，保持时间顺序
                     curr_id = ch.previous_chapter_id
                 else:
                     break
             
             state.memory_context.recent_summaries = summaries
+            # 将关键事件也放入上下文（如果 state 结构支持，或者合并到摘要中）
+            if key_events:
+                # 简单处理：将最近的关键事件合并到 summaries 的最后一条
+                events_str = "\n前文关键事件回顾：\n- " + "\n- ".join(key_events[-5:])
+                if state.memory_context.recent_summaries:
+                    state.memory_context.recent_summaries[-1] += events_str
+
             print(f"✅ 已加载 {len(summaries)} 条历史摘要 (Branch: {state.current_branch})。")
             
             return {"next_action": "plan"}

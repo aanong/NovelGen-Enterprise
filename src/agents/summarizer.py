@@ -47,6 +47,8 @@ class SummarizerAgent(BaseAgent):
                 "1. summary: 200字以内的剧情梗概\n"
                 "2. key_events: 关键事件列表\n"
                 "3. character_status_updates: 角色状态的显著变化（如有）\n"
+                "4. new_foreshadowing: 本章新埋下的伏笔或悬念列表（如有）\n"
+                "5. resolved_threads: 本章已解决或推进的旧伏笔列表（如有）\n"
             ))
         ])
 

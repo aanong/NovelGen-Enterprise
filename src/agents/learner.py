@@ -14,6 +14,7 @@ from .base import BaseAgent
 from ..db.base import SessionLocal
 from ..db.models import NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle
 from sqlalchemy.orm import Session
+from ..config import Config
 
 # --- Defines the schemas for parsing ---
 

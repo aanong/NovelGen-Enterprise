@@ -190,6 +190,46 @@ class ArchitectAgent(BaseAgent):
         })
         return result.expanded_points
 
+    async def check_coherence(self, state: NGEState, plan_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        检查规划与前文的连贯性。
+        """
+        recent_summaries = getattr(getattr(state, "memory_context", None), "recent_summaries", [])
+        last_summary = "\n".join([f"- {s}" for s in recent_summaries[-3:]]) if recent_summaries else "无前文"
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", (
+                "你是一个极其严谨的小说逻辑审查员。你的任务是检查【拟定的下一章规划】与【前文内容】是否存在逻辑矛盾。\n"
+                "重点检查：\n"
+                "1. 时间线是否冲突？\n"
+                "2. 角色位置、状态是否连续？\n"
+                "3. 核心设定是否被违反？\n"
+                "输出格式：JSON，包含 coherent (bool) 和 issues (list of str)。"
+            )),
+            ("human", (
+                "【前文摘要回顾】\n{last_summary}\n\n"
+                "【拟定的规划】\n"
+                "场景：{scene}\n"
+                "冲突：{conflict}\n"
+                "指令：{instruction}\n\n"
+                "请评估其连贯性。"
+            ))
+        ])
+        
+        try:
+            messages = prompt.format_messages(
+                last_summary=last_summary,
+                scene=plan_data.get("scene", ""),
+                conflict=plan_data.get("conflict", ""),
+                instruction=plan_data.get("instruction", "")
+            )
+            response = await self.llm.ainvoke(messages)
+            content = strip_think_tags(normalize_llm_content(response.content))
+            return extract_json_from_text(content)
+        except Exception as e:
+            print(f"Coherence Check Error: {e}")
+            return {"coherent": True, "issues": []}
+
     async def plan_next_chapter(self, state: NGEState) -> Dict[str, Any]:
         """
         写每一章前，Agent 必须回答："这一章如何服务于主线？上一章的结尾是什么？"
@@ -232,7 +272,11 @@ class ArchitectAgent(BaseAgent):
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个剧情规划专家。任务是为即将撰写的章节制定详细的微型提纲。\n"
-                "必须输出 JSON 格式，包含 thinking, scene_description, key_conflict, instruction。\n"
+                "必须输出 JSON 格式，包含 thinking, scene_description, key_conflict, instruction, foreshadowing_strategy。\n"
+                "【伏笔管理要求】：\n"
+                "1. 推进策略：明确指出本章应推进哪些已有的存量伏笔。\n"
+                "2. 回收策略：如果剧情时机成熟，明确指出应在本章回收/揭晓的伏笔。\n"
+                "3. 埋线策略：根据主线需要，本章是否需要埋下新的伏笔或悬念。\n"
                 "{format_instructions}"
             )),
             ("human", (
@@ -240,7 +284,7 @@ class ArchitectAgent(BaseAgent):
                 "【人物信息】\n{char_info}\n\n"
                 "【未回收伏笔/悬念】\n{threads_str}\n\n"
                 "【当前剧情点】\n{current_point_info}\n\n"
-                "请规划下一章详情：如果合适，推进或回收伏笔；也可埋下与主线相关的新伏笔。"
+                "请规划下一章详情。在 instruction 中显式包含对伏笔处理的具体写作指令。"
             ))
         ])
 
