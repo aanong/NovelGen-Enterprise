@@ -10,6 +10,7 @@ from .agents.writer import WriterAgent
 from .agents.reviewer import ReviewerAgent
 from .agents.style_analyzer import StyleAnalyzer
 from .agents.evolver import CharacterEvolver
+from .agents.summarizer import ChapterSummarizer
 from .agents.constants import NodeAction, ReviewDecision, OutlineStatus, Defaults
 from .db.base import SessionLocal
 from .db.models import (
@@ -34,6 +35,7 @@ class NGEGraph:
         self.reviewer = ReviewerAgent()
         self.analyzer = StyleAnalyzer()
         self.evolver = CharacterEvolver()
+        self.summarizer = ChapterSummarizer()
         
         self.workflow = StateGraph(NGEState)
         self._build_graph()
@@ -186,6 +188,13 @@ class NGEGraph:
         try:
             current_chapter_num = state.current_plot_index + 1
             
+            # 0. 检查章节连贯性（如果已有前文）
+            if state.last_chapter_id or state.memory_context.recent_summaries:
+                coherence_check = await self._check_chapter_coherence(state)
+                if not coherence_check.get("coherent", True):
+                    logger.warning(f"章节连贯性检查发现问题: {coherence_check.get('issues', [])}")
+                    print(f"⚠️ 连贯性提醒: {', '.join(coherence_check.get('issues', [])[:2])}")
+            
             # 1. 检查 DB 是否已有大纲 (匹配 branch_id)
             outline = db.query(PlotOutline).filter_by(
                 novel_id=state.current_novel_id, 
@@ -233,35 +242,83 @@ class NGEGraph:
             db.close()
 
     async def refine_context_node(self, state: NGEState):
-        """上下文精炼 (Real RAG Implementation)"""
-        print("--- REFINING CONTEXT VIA RAG ---")
+        """上下文精炼 (增强的 RAG Implementation)"""
+        print("--- REFINING CONTEXT VIA ENHANCED RAG ---")
         
-        # 1. 获取当前规划的场景描述作为 Query
-        query = state.review_feedback # 在 plan 节点中，instruction 或 plan_data 被存入 review_feedback
+        # 1. 构建更精准的 RAG 查询
+        query = self._build_rag_query(state)
         
         vs = VectorStore()
         try:
-            # 2. 检索相关世界观
-            bible_results = await vs.search_bible(query, top_k=3)
-            bible_context = "\n".join([f"[{b['key']}]: {b['content']}" for b in bible_results])
+            import asyncio
             
-            # 3. 检索相关文风范例
-            style_results = await vs.search_style(query, top_k=1)
-            style_context = style_results[0]['content'] if style_results else "常规文风"
+            # 2. 并行检索多种资料（增强检索范围）
+            bible_results, style_results, plot_tropes, char_archetypes = await asyncio.gather(
+                vs.search_bible(query, top_k=5),  # 从3增加到5
+                vs.search_style(query, top_k=3),  # 从1增加到3
+                vs.search_references(query, top_k=2, category="plot_trope"),
+                vs.search_references(query, top_k=2, category="character_archetype"),
+                return_exceptions=True
+            )
             
-            print(f"✅ RAG 检索完成。找到 {len(bible_results)} 条相关设定。")
+            # 处理异常
+            if isinstance(bible_results, Exception):
+                logger.warning(f"Bible search failed: {bible_results}")
+                bible_results = []
+            if isinstance(style_results, Exception):
+                logger.warning(f"Style search failed: {style_results}")
+                style_results = []
+            if isinstance(plot_tropes, Exception):
+                logger.warning(f"Plot tropes search failed: {plot_tropes}")
+                plot_tropes = []
+            if isinstance(char_archetypes, Exception):
+                logger.warning(f"Character archetypes search failed: {char_archetypes}")
+                char_archetypes = []
+            
+            # 3. 格式化检索结果
+            bible_context = "\n".join([f"[{b['key']}]: {b['content']}" for b in bible_results]) if bible_results else ""
+            
+            # 多文风参考融合
+            style_context = self._format_style_references(style_results, state)
+            
+            # 剧情套路参考
+            plot_context = ""
+            if plot_tropes:
+                plot_context = "\n【剧情套路参考】\n" + "\n".join([
+                    f"- {t.get('title', '套路')}: {t.get('content', '')[:150]}..."
+                    for t in plot_tropes
+                ])
+            
+            # 人物原型参考
+            archetype_context = ""
+            if char_archetypes:
+                archetype_context = "\n【人物原型参考】\n" + "\n".join([
+                    f"- {a.get('title', '原型')}: {a.get('content', '')[:150]}..."
+                    for a in char_archetypes
+                ])
+            
+            print(f"✅ 增强 RAG 检索完成。世界观:{len(bible_results)}, 文风:{len(style_results)}, 套路:{len(plot_tropes)}, 原型:{len(char_archetypes)}")
             
             # 4. 更新 State 中的提示词
-            # 将检索到的内容注入到 review_feedback 中，供 Writer 使用
             enhanced_instruction = (
                 f"{state.review_feedback}\n\n"
-                f"【参考世界观设定】\n{bible_context}\n\n"
-                f"【文风参考范例】\n{style_context}"
+                f"【参考世界观设定】\n{bible_context}\n"
+                f"{style_context}"
+                f"{plot_context}"
+                f"{archetype_context}"
             )
+            
+            # 保存到 refined_context 供后续使用
+            refined_context_list = []
+            if bible_context:
+                refined_context_list.append(f"世界观设定：{bible_context[:200]}...")
+            if plot_context:
+                refined_context_list.append(f"剧情套路：{plot_context[:200]}...")
             
             return {
                 "next_action": NodeAction.WRITE,
-                "review_feedback": enhanced_instruction
+                "review_feedback": enhanced_instruction,
+                "refined_context": refined_context_list
             }
         except Exception as e:
             logger.error(f"RAG refinement error: {e}", exc_info=True)
@@ -269,6 +326,51 @@ class NGEGraph:
             return {"next_action": NodeAction.WRITE}
         finally:
             vs.close()
+    
+    def _build_rag_query(self, state: NGEState) -> str:
+        """构建更精准的 RAG 查询"""
+        query_parts = []
+        
+        # 从 review_feedback 中提取场景和冲突信息
+        if state.review_feedback:
+            query_parts.append(state.review_feedback[:200])  # 限制长度
+        
+        # 添加当前剧情点信息
+        if state.current_plot_index < len(state.plot_progress):
+            plot_point = state.plot_progress[state.current_plot_index]
+            query_parts.append(plot_point.title)
+            query_parts.append(plot_point.description[:100])
+        
+        # 添加涉及的主要人物
+        if state.characters:
+            main_chars = [name for name, char in list(state.characters.items())[:3] 
+                         if char.current_mood]
+            if main_chars:
+                query_parts.append(" ".join(main_chars))
+        
+        return " ".join([p for p in query_parts if p])
+    
+    def _format_style_references(self, style_results: list, state: NGEState) -> str:
+        """格式化多文风参考"""
+        if not style_results:
+            return "【文风参考范例】\n常规文风\n"
+        
+        # 根据场景类型选择不同的文风描述
+        scene_type = state.antigravity_context.scene_constraints.get("scene_type", "Normal")
+        scene_keywords = {
+            "Action": "动作 战斗 紧张",
+            "Emotional": "情感 心理 细腻",
+            "Dialogue": "对话 交流 语言",
+            "Normal": "常规 叙述"
+        }
+        
+        style_parts = [f"【文风参考（{scene_type}场景）】"]
+        for i, style in enumerate(style_results[:3], 1):
+            content = style.get('content', '')
+            if content:
+                style_parts.append(f"\n参考 {i}：\n{content[:300]}...")
+        
+        return "\n".join(style_parts) + "\n"
 
     async def write_node(self, state: NGEState):
         print("--- WRITING CHAPTER ---")
@@ -466,8 +568,27 @@ class NGEGraph:
                 chapter_entry.title = state.plot_progress[state.current_plot_index].title
                 
             chapter_entry.content = state.current_draft
-            from .utils import generate_chapter_summary
-            chapter_entry.summary = generate_chapter_summary(state.current_draft)
+            
+            # 使用新的结构化摘要生成器
+            try:
+                summary_result = await self.summarizer.generate_summary(
+                    state.current_draft, 
+                    state=state
+                )
+                chapter_entry.summary = summary_result.get("summary", state.current_draft[:200])
+                
+                # 提取新伏笔并添加到全局伏笔列表
+                new_foreshadowing = summary_result.get("new_foreshadowing", [])
+                for f in new_foreshadowing:
+                    if f and f not in state.memory_context.global_foreshadowing:
+                        state.memory_context.global_foreshadowing.append(f)
+                        print(f"📖 从摘要中提取新伏笔: {f}")
+            except Exception as e:
+                logger.error(f"摘要生成失败，使用回退方案: {e}", exc_info=True)
+                # 回退到简单摘要
+                from .utils import generate_chapter_summary
+                chapter_entry.summary = generate_chapter_summary(state.current_draft)
+            
             chapter_entry.logic_checked = True
             
             outline = db.query(PlotOutline).filter_by(

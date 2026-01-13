@@ -210,9 +210,10 @@ class ArchitectAgent:
             for n, c in state.characters.items()
         ])
         
-        # 获取全局伏笔
+        # 获取全局伏笔并进行分析
         active_threads = state.memory_context.global_foreshadowing
-        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
+        foreshadowing_analysis = self._analyze_foreshadowing(active_threads, state)
+        threads_str = self._format_foreshadowing_for_planning(active_threads, foreshadowing_analysis)
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
@@ -220,15 +221,25 @@ class ArchitectAgent:
                 "【反重力规则警告】\n"
                 "- Rule 1.1: 严禁修改世界观设定，只能根据设定进行演绎\n"
                 "- Rule 2.2: 严禁自发导致人物性格突变或降智\n"
+                "【伏笔管理要求】\n"
+                "- 必须主动考虑未解决的伏笔，在合适的时机推进或回收\n"
+                "- 如果本章适合推进伏笔，请在规划中明确说明如何推进\n"
+                "- 如果本章适合回收伏笔，请在规划中明确说明如何回收\n"
+                "- 可以埋下新的伏笔，但要与主线相关\n"
                 "必须输出 JSON 格式，包含 thinking, scene_description, key_conflict, instruction。\n"
                 "{format_instructions}"
             )),
             ("human", (
                 "当前活跃角色状态：\n{char_info}\n\n"
                 "当前剧情点：\n{current_point_info}\n\n"
-                "【未回收伏笔/悬念】：\n{threads_str}\n\n"
+                "{foreshadowing_section}\n\n"
                 "上一章总结：{last_summary}\n\n"
-                "请规划下一章详情。如果合适，请尝试推进或回收上述伏笔。"
+                "请规划下一章详情。\n"
+                "【特别要求】\n"
+                "1. 如果合适，请在本章中推进或回收上述伏笔\n"
+                "2. 确保本章与前文逻辑连贯，合理承接\n"
+                "3. 如果合适，可以埋下新的伏笔\n"
+                "4. 确保本章服务于主线剧情"
             ))
         ])
         
@@ -236,7 +247,7 @@ class ArchitectAgent:
             "char_info": char_info,
             "current_point_info": current_point_info,
             "last_summary": last_summary,
-            "threads_str": threads_str,
+            "foreshadowing_section": threads_str,
             "format_instructions": self.plan_parser.get_format_instructions()
         }
         
