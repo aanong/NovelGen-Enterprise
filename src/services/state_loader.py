@@ -1,7 +1,8 @@
+from sqlalchemy import func
 from src.schemas.state import NGEState, NovelBible, CharacterState, PlotPoint, MemoryContext, WorldItemSchema
 from src.schemas.style import StyleFeatures
 from src.db.base import SessionLocal
-from src.db.models import Novel, NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle, WorldItem as DBWorldItem
+from src.db.models import Novel, NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle, WorldItem as DBWorldItem, Chapter as DBChapter
 
 from typing import Optional
 
@@ -59,16 +60,17 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional
             ) for o in db_outlines
         ]
         
-        # Determine current plot index (first non-completed chapter)
-        current_plot_index = 0
-        for i, p in enumerate(plot_progress):
-            if not p.is_completed:
-                current_plot_index = i
-                break
-        else:
-            # If all existing outlines are completed, set to the end (waiting for new outline or done)
-            if plot_progress:
-                current_plot_index = len(plot_progress)
+        # --- 章节顺序逻辑修正 ---
+        # 查找最新的已生成章节号，而不是依赖大纲状态
+        last_chapter = db.query(func.max(DBChapter.chapter_number)).filter(
+            DBChapter.novel_id == novel_id,
+            DBChapter.branch_id == branch_id
+        ).scalar()
+
+        # 如果没有已生成的章节，从 0 开始；否则，从下一章开始
+        current_plot_index = (last_chapter or 0)
+
+        print(f"🧠 状态加载器：找到上一章为 {last_chapter}，将从索引 {current_plot_index} 开始生成。")
 
         world_items = [
             WorldItemSchema(
