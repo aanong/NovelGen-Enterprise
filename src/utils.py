@@ -6,13 +6,18 @@ import re
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import google.generativeai as genai
 from .config import Config
 
 try:
-    genai.configure(api_key=Config.model.GEMINI_API_KEY)
-except:
-    pass
+    import google.generativeai as genai  # type: ignore
+except Exception:
+    genai = None
+
+if genai is not None:
+    try:
+        genai.configure(api_key=Config.model.GEMINI_API_KEY)
+    except Exception:
+        pass
 
 
 def get_embedding(text: str) -> List[float]:
@@ -20,6 +25,8 @@ def get_embedding(text: str) -> List[float]:
     使用 Gemini 模型获取文本的 Embedding 向量
     """
     try:
+        if genai is None:
+            return [0.1] * 768
         result = genai.embed_content(
             model=Config.model.EMBEDDING_MODEL,
             content=text,

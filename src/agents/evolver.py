@@ -26,6 +26,10 @@ class EvolutionResult(BaseModel):
     evolutions: List[CharacterEvolution]
     story_updates: Optional[PlotUpdate] = None
 
+from .base import BaseAgent
+from .constants import PromptTemplates
+from langchain_core.prompts import ChatPromptTemplate
+
 class CharacterEvolver(BaseAgent):
     """
     负责在章节结束后，根据内容分析人物状态的演化及剧情推进。
@@ -60,44 +64,61 @@ class CharacterEvolver(BaseAgent):
         active_threads = state.memory_context.global_foreshadowing 
         active_threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
 
-        prompt = f"""
-        你是一个专业的小说编辑，擅长分析人物弧光和成长，以及剧情线的收束。
-        请仔细阅读以下章节内容，并分析其中主要人物的状态变化以及剧情伏笔的变动。
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", (
+                "你是一个专业的小说编辑，擅长分析人物弧光和成长，以及剧情线的收束。\n"
+                f"{PromptTemplates.ANTIGRAVITY_WARNING}\n"
+                "请仔细阅读以下章节内容，并分析其中主要人物的状态变化以及剧情伏笔的变动。\n"
+                "请严格按照 JSON 格式输出。"
+            )),
+            ("human", (
+                "**章节内容:**\n"
+                "---\n"
+                "{chapter_content}\n"
+                "---\n"
+                "**涉及人物:** {characters_involved}\n"
+                "**当前未解决伏笔:**\n{active_threads_str}\n\n"
+                "请根据章节内容：\n"
+                "1. 为每一个发生了显著变化的人物（心情、技能、人际关系、状态等）生成演化报告。\n"
+                "2. 分析本章是否埋下了新的伏笔？\n"
+                "3. 分析本章是否回收/解决了上述'当前未解决伏笔'中的任何一项？\n\n"
+                "请严格按照以下 JSON 格式输出：\n"
+                "{{\n"
+                "    \"evolutions\": [\n"
+                "        {{\n"
+                "            \"character_name\": \"角色A\",\n"
+                "            \"mood_change\": \"...\",\n"
+                "            \"skill_update\": [\"...\"],\n"
+                "            \"relationship_change\": {{ \"角色B\": \"...\" }},\n"
+                "            \"status_change\": {{ \"is_active\": false, \"reason\": \"死亡\" }},\n"
+                "            \"evolution_summary\": \"...\"\n"
+                "        }}\n"
+                "    ],\n"
+                "    \"story_updates\": {{\n"
+                "        \"new_foreshadowing\": [\"...\"],\n"
+                "        \"resolved_threads\": [\"...\"]\n"
+                "    }}\n"
+                "}}"
+            ))
+        ])
 
-        **章节内容:**
-        ---
-        {chapter_content}
-        ---
-
-        **涉及人物:** {', '.join(characters_involved)}
+        messages = prompt.format_messages(
+            chapter_content=chapter_content,
+            characters_involved=", ".join(characters_involved),
+            active_threads_str=active_threads_str
+        )
         
-        **当前未解决伏笔:**
-        {active_threads_str}
-
-        请根据章节内容：
-        1. 为每一个发生了显著变化的人物（心情、技能、人际关系、状态等）生成演化报告。
-        2. 分析本章是否埋下了新的伏笔？
-        3. 分析本章是否回收/解决了上述"当前未解决伏笔"中的任何一项？
-
-        请严格按照以下 JSON 格式输出：
+        response = await self.llm.ainvoke(messages)
+        content = normalize_llm_content(response.content)
+        content = strip_think_tags(content)
+        data = extract_json_from_text(content)
         
-        {{
-            "evolutions": [
-                {{
-                    "character_name": "角色A",
-                    "mood_change": "...",
-                    "skill_update": ["..."],
-                    "relationship_change": {{ "角色B": "..." }},
-                    "status_change": {{ "is_active": false, "reason": "死亡" }},
-                    "evolution_summary": "..."
-                }}
-            ],
-            "story_updates": {{
-                "new_foreshadowing": ["发现了一个神秘的黑色盒子", "主角感到有人在暗中窥视"],
-                "resolved_threads": ["之前提到的神秘信件终于被破解了"]
-            }}
-        }}
-        """
+        if not data:
+             # Fallback empty result
+             return EvolutionResult(evolutions=[], story_updates=PlotUpdate())
+             
+        return EvolutionResult.model_validate(data)
+
         
         try:
             response = await self.llm.ainvoke(prompt)

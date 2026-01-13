@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from .constants import SceneType, Defaults, PromptTemplates, ErrorMessages
+
 class ReviewerAgent(BaseAgent):
     """
     Reviewer Agent (Gemini): 负责逻辑审查、人物OOC检查及状态演化。
@@ -54,10 +56,7 @@ class ReviewerAgent(BaseAgent):
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个极其敏锐的小说评论家和逻辑学家。你的任务是发现草稿中的任何微小漏洞。\n"
-                "【反重力规则警告】\n"
-                "- 严禁人物性格突变 (OOC)\n"
-                "- 严禁逻辑硬伤\n"
-                "- 严禁修改已确定的世界观\n"
+                f"{PromptTemplates.ANTIGRAVITY_WARNING}\n"
                 "当前人物灵魂锚定：\n{character_rules}\n"
                 "【需关注的未回收伏笔】：\n{threads_str}\n"
                 "输出格式必须为 JSON。"
@@ -69,6 +68,7 @@ class ReviewerAgent(BaseAgent):
                 "必须包含以下字段：passed (bool), score (0.0-1.0), feedback (str), logical_errors (list)"
             ))
         ])
+
         
         last_summary = state.memory_context.recent_summaries[-1] if state.memory_context.recent_summaries else "开篇"
         

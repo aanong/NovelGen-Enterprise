@@ -1,33 +1,158 @@
 """
 NovelGen-Enterprise Vector Store
-处理基于 pgvector 的语义检索或本地向量检索 fallback
+Unified vector search implementation with pgvector support and local fallback.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Type, Union
 import numpy as np
-from sqlalchemy import text
+from sqlalchemy import text, or_
+from sqlalchemy.orm import Session
 from .base import SessionLocal
 from .models import NovelBible, StyleRef, ReferenceMaterial
 from ..utils import get_embedding
+import logging
+
+logger = logging.getLogger(__name__)
 
 class VectorStore:
-    def __init__(self, db_session=None):
+    def __init__(self, db_session: Optional[Session] = None):
         self._db = db_session or SessionLocal()
         self.has_pgvector = self._check_pgvector()
 
     def _check_pgvector(self) -> bool:
-        """检查数据库是否支持 pgvector 扩展"""
+        """Check if pgvector extension is available."""
         try:
             self._db.execute(text("SELECT '[]'::vector"))
             return True
         except Exception:
-            self._db.rollback() # Important: clean up the aborted transaction
+            self._db.rollback()
             return False
 
     def _cosine_similarity(self, v1: List[float], v2: List[float]) -> float:
-        """计算余弦相似度"""
+        """Calculate cosine similarity between two vectors."""
         v1 = np.array(v1)
         v2 = np.array(v2)
-        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        norm_v1 = np.linalg.norm(v1)
+        norm_v2 = np.linalg.norm(v2)
+        if norm_v1 == 0 or norm_v2 == 0:
+            return 0.0
+        return np.dot(v1, v2) / (norm_v1 * norm_v2)
+
+    async def search(
+        self, 
+        query: str, 
+        model_class: Type[Union[ReferenceMaterial, NovelBible, StyleRef]] = ReferenceMaterial,
+        top_k: int = 3, 
+        filters: Optional[Dict[str, Any]] = None,
+        novel_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generic search method for any model with an embedding column.
+        
+        Args:
+            query: The search query text.
+            model_class: The SQLAlchemy model class to search (ReferenceMaterial, NovelBible, etc.).
+            top_k: Number of results to return.
+            filters: Dictionary of exact match filters (e.g., {'category': 'world_setting'}).
+            novel_id: Optional novel_id for scoping. 
+                      For ReferenceMaterial, it searches (novel_id OR global).
+                      For others, it typically searches (novel_id only).
+        """
+        query_vector = get_embedding(query)
+        if not query_vector:
+            logger.warning("Failed to generate embedding for query.")
+            return []
+
+        db_filters = []
+        if filters:
+            for k, v in filters.items():
+                if hasattr(model_class, k):
+                    db_filters.append(getattr(model_class, k) == v)
+        
+        # Handle novel_id scoping
+        if novel_id is not None and hasattr(model_class, 'novel_id'):
+            if model_class == ReferenceMaterial:
+                # For References: include specific novel items AND global items (novel_id is None)
+                db_filters.append(or_(
+                    model_class.novel_id == novel_id,
+                    model_class.novel_id.is_(None)
+                ))
+            else:
+                # For Bible/Style: strictly scope to the novel
+                db_filters.append(model_class.novel_id == novel_id)
+        
+        # 1. Try pgvector search
+        if self.has_pgvector:
+            try:
+                q = self._db.query(model_class)
+                if db_filters:
+                    q = q.filter(*db_filters)
+                
+                # Use L2 distance for sorting (nearest neighbors)
+                items = q.order_by(
+                    model_class.embedding.l2_distance(query_vector)
+                ).limit(top_k).all()
+                
+                return self._format_results(items, model_class)
+            except Exception as e:
+                logger.error(f"Native vector search failed: {e}. Falling back to local.")
+                self._db.rollback()
+
+        # 2. Fallback to local cosine similarity
+        try:
+            q = self._db.query(model_class)
+            if db_filters:
+                q = q.filter(*db_filters)
+            all_items = q.all()
+            
+            scored_results = []
+            for item in all_items:
+                if item.embedding:
+                    sim = self._cosine_similarity(query_vector, item.embedding)
+                    
+                    # Boost priority for novel-specific items over global ones
+                    priority = 1.0
+                    if model_class == ReferenceMaterial and item.novel_id:
+                        priority = 1.2 # Give a slight boost to local items
+                    
+                    scored_results.append((sim * priority, item))
+            
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            top_items = [item for _, item in scored_results[:top_k]]
+            
+            return self._format_results(top_items, model_class)
+            
+        except Exception as e:
+            logger.error(f"Fallback search failed: {e}")
+            return []
+
+    def _format_results(self, items: List[Any], model_class: Type) -> List[Dict[str, Any]]:
+        """Format the search results into a standard list of dicts."""
+        results = []
+        for item in items:
+            data = {
+                "id": item.id,
+                "content": getattr(item, 'content', ''),
+                "embedding": getattr(item, 'embedding', [])
+            }
+            
+            # Add model-specific fields
+            if model_class == ReferenceMaterial:
+                data.update({
+                    "title": item.title,
+                    "source": item.source,
+                    "category": item.category,
+                    "novel_id": item.novel_id
+                })
+            elif model_class == NovelBible:
+                data.update({
+                    "key": item.key,
+                    "category": item.category,
+                    "novel_id": item.novel_id
+                })
+            # Add more specific formatting if needed
+            
+            results.append(data)
+        return results
 
     async def search_references(
         self, 
@@ -36,161 +161,15 @@ class VectorStore:
         category: Optional[str] = None,
         novel_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """
-        搜索通用参考资料
-        
-        Args:
-            query: 查询文本
-            top_k: 返回结果数量
-            category: 分类过滤（world_setting, plot_trope, character_archetype, style）
-            novel_id: 小说ID，如果提供则优先搜索该小说的资料库，同时也会搜索全局资料库
-        """
-        query_vector = get_embedding(query)
-        
-        filters = []
+        """Legacy wrapper for backward compatibility."""
+        filters = {}
         if category:
-            filters.append(ReferenceMaterial.category == category)
-        
-        # 如果指定了 novel_id，优先搜索该小说的资料库，同时包含全局资料库
-        if novel_id is not None:
-            # 优先搜索该小说的资料库，然后搜索全局资料库（novel_id is None）
-            # 使用 OR 条件：novel_id == novel_id OR novel_id IS NULL
-            from sqlalchemy import or_
-            filters.append(or_(
-                ReferenceMaterial.novel_id == novel_id,
-                ReferenceMaterial.novel_id.is_(None)
-            ))
+            filters['category'] = category
             
-        if self.has_pgvector:
-            try:
-                q = self._db.query(ReferenceMaterial)
-                if filters:
-                    q = q.filter(*filters)
-                    
-                items = q.order_by(
-                    ReferenceMaterial.embedding.l2_distance(query_vector)
-                ).limit(top_k).all()
-                
-                return [{
-                    "title": item.title,
-                    "content": item.content,
-                    "source": item.source,
-                    "category": item.category,
-                    "novel_id": item.novel_id
-                } for item in items]
-            except Exception as e:
-                print(f"Native vector search failed (References): {e}")
-        
-        # Fallback
-        try:
-            q = self._db.query(ReferenceMaterial)
-            if filters:
-                q = q.filter(*filters)
-            all_items = q.all()
-            
-            results = []
-            for item in all_items:
-                if item.embedding:
-                    sim = self._cosine_similarity(query_vector, item.embedding)
-                    # 优先显示小说专属资料库（novel_id 不为 None）
-                    priority = 1.0 if item.novel_id else 0.5
-                    results.append((sim * priority, item))
-            
-            results.sort(key=lambda x: x[0], reverse=True)
-            
-            return [{
-                "title": item.title,
-                "content": item.content,
-                "source": item.source,
-                "category": item.category,
-                "novel_id": item.novel_id,
-                "score": float(score)
-            } for score, item in results[:top_k]]
-        except Exception as e:
-            print(f"Fallback vector search failed (References): {e}")
-            return []
-
-    async def search_bible(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """搜索世界观设定 (Novel Bible) 使用向量相似度"""
-        query_vector = get_embedding(query)
-        
-        if self.has_pgvector:
-            try:
-                # 使用 pgvector 的 L2 距离
-                items = self._db.query(NovelBible).order_by(
-                    NovelBible.embedding.l2_distance(query_vector)
-                ).limit(top_k).all()
-                
-                return [{
-                    "key": item.key,
-                    "content": item.content,
-                    "category": item.category
-                } for item in items]
-            except Exception as e:
-                print(f"Native vector search failed (Bible): {e}")
-        
-        # Fallback to Python-side cosine similarity
-        try:
-            all_items = self._db.query(NovelBible).all()
-            if not all_items:
-                return []
-            
-            # Calculate similarities
-            results = []
-            for item in all_items:
-                if item.embedding:
-                    sim = self._cosine_similarity(query_vector, item.embedding)
-                    results.append((sim, item))
-            
-            # Sort by similarity descending
-            results.sort(key=lambda x: x[0], reverse=True)
-            
-            return [{
-                "key": item.key,
-                "content": item.content,
-                "category": item.category,
-                "score": float(score)
-            } for score, item in results[:top_k]]
-        except Exception as e:
-            print(f"Fallback vector search failed (Bible): {e}")
-            return []
-
-    async def search_style(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """搜索文风范例 (Style Ref) 使用向量相似度"""
-        query_vector = get_embedding(query)
-        
-        if self.has_pgvector:
-            try:
-                items = self._db.query(StyleRef).order_by(
-                    StyleRef.embedding.l2_distance(query_vector)
-                ).limit(top_k).all()
-                
-                return [{
-                    "content": item.content,
-                    "metadata": item.style_metadata
-                } for item in items]
-            except Exception as e:
-                print(f"Native vector search failed (Style): {e}")
-        
-        # Fallback
-        try:
-            all_items = self._db.query(StyleRef).all()
-            results = []
-            for item in all_items:
-                if item.embedding:
-                    sim = self._cosine_similarity(query_vector, item.embedding)
-                    results.append((sim, item))
-            
-            results.sort(key=lambda x: x[0], reverse=True)
-            
-            return [{
-                "content": item.content,
-                "metadata": item.style_metadata,
-                "score": float(score)
-            } for score, item in results[:top_k]]
-        except Exception as e:
-            print(f"Fallback vector search failed (Style): {e}")
-            return []
-
-    def close(self):
-        self._db.close()
+        return await self.search(
+            query=query,
+            model_class=ReferenceMaterial,
+            top_k=top_k,
+            filters=filters,
+            novel_id=novel_id
+        )

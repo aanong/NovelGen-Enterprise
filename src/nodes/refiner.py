@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 from ..schemas.state import NGEState
 from ..agents.constants import NodeAction
 from ..db.vector_store import VectorStore
+from ..db.models import NovelBible, StyleRef, ReferenceMaterial
 from .base import BaseNode
 
 logger = logging.getLogger(__name__)
@@ -15,15 +16,16 @@ class RefineContextNode(BaseNode):
         
         # 1. 构建更精准的 RAG 查询
         query = self._build_rag_query(state)
+        novel_id = state.novel_id if hasattr(state, 'novel_id') else None
         
         vs = VectorStore()
         try:
             # 2. 并行检索多种资料（增强检索范围）
             bible_results, style_results, plot_tropes, char_archetypes = await asyncio.gather(
-                vs.search_bible(query, top_k=5),
-                vs.search_style(query, top_k=3),
-                vs.search_references(query, top_k=2, category="plot_trope"),
-                vs.search_references(query, top_k=2, category="character_archetype"),
+                vs.search(query, model_class=NovelBible, top_k=5, novel_id=novel_id),
+                vs.search(query, model_class=StyleRef, top_k=3, novel_id=novel_id),
+                vs.search(query, model_class=ReferenceMaterial, top_k=2, filters={"category": "plot_trope"}, novel_id=novel_id),
+                vs.search(query, model_class=ReferenceMaterial, top_k=2, filters={"category": "character_archetype"}, novel_id=novel_id),
                 return_exceptions=True
             )
             
@@ -42,7 +44,7 @@ class RefineContextNode(BaseNode):
                 char_archetypes = []
             
             # 3. 格式化检索结果
-            bible_context = "\n".join([f"[{b['key']}]: {b['content']}" for b in bible_results]) if bible_results else ""
+            bible_context = "\n".join([f"[{b.get('key', 'Unknown')}]: {b.get('content', '')}" for b in bible_results]) if bible_results else ""
             
             # 多文风参考融合
             style_context = self._format_style_references(style_results, state)

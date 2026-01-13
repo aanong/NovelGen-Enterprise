@@ -199,101 +199,77 @@ class ArchitectAgent(BaseAgent):
             current_point_info = "剧情自由发展阶段"
         else:
             current_point = state.plot_progress[state.current_plot_index]
-            current_point_info = f"标题：{current_point.title}\n描述：{current_point.description}\n关键事件：{', '.join(current_point.key_events)}"
+            key_events = getattr(current_point, "key_events", []) or []
+            current_point_info = (
+                f"标题：{getattr(current_point, 'title', '')}\n"
+                f"描述：{getattr(current_point, 'description', '')}\n"
+                f"关键事件：{', '.join(key_events)}"
+            )
 
-        if state.memory_context.recent_summaries:
-            # 使用所有最近的摘要，构建更完整的上下文
-            last_summary = "\n".join([f"- {s}" for s in state.memory_context.recent_summaries])
+        recent_summaries = getattr(getattr(state, "memory_context", None), "recent_summaries", None) or []
+        if recent_summaries:
+            last_summary = "\n".join([f"- {s}" for s in recent_summaries])
         else:
             last_summary = "开篇第一章"
-        
-        char_info = "\n".join([
-            f"- {n}: 技能={', '.join(c.skills)}, 资产={json.dumps(c.assets, ensure_ascii=False)}, 物品={', '.join([i.name for i in c.inventory])}"
-            for n, c in state.characters.items()
-        ])
-        
-        # 获取全局伏笔并进行分析
-        active_threads = state.memory_context.global_foreshadowing
-        # foreshadowing_analysis = self._analyze_foreshadowing(active_threads, state)
-        threads_str = self._format_foreshadowing_for_planning(active_threads, None)
+
+        characters = getattr(state, "characters", None) or {}
+        if characters:
+            char_info = "\n".join([
+                (
+                    f"- {name}: "
+                    f"技能={', '.join(getattr(char, 'skills', []) or [])}, "
+                    f"资产={json.dumps(getattr(char, 'assets', {}) or {}, ensure_ascii=False)}, "
+                    f"物品={', '.join([getattr(i, 'name', str(i)) for i in (getattr(char, 'inventory', []) or [])])}"
+                )
+                for name, char in characters.items()
+            ])
+        else:
+            char_info = "无"
+
+        active_threads = getattr(getattr(state, "memory_context", None), "global_foreshadowing", None) or []
+        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个剧情规划专家。任务是为即将撰写的章节制定详细的微型提纲。\n"
-                "【反重力规则警告】\n"
-                "- Rule 1.1: 严禁修改世界观设定，只能根据设定进行演绎\n"
-                "- Rule 2.2: 严禁自发导致人物性格突变或降智\n"
-                "【伏笔管理要求】\n"
-                "- 必须主动考虑未解决的伏笔，在合适的时机推进或回收\n"
-                "- 如果本章适合推进伏笔，请在规划中明确说明如何推进\n"
-                "- 如果本章适合回收伏笔，请在规划中明确说明如何回收\n"
-                "- 可以埋下新的伏笔，但要与主线相关\n"
                 "必须输出 JSON 格式，包含 thinking, scene_description, key_conflict, instruction。\n"
                 "{format_instructions}"
             )),
             ("human", (
-                "当前活跃角色状态：\n{char_info}\n\n"
-                "当前剧情点：\n{current_point_info}\n\n"
-                "{foreshadowing_section}\n\n"
-                "上一章总结：{last_summary}\n\n"
-                "请规划下一章详情。\n"
-                "【特别要求】\n"
-                "1. 如果合适，请在本章中推进或回收上述伏笔\n"
-                "2. 确保本章与前文逻辑连贯，合理承接\n"
-                "3. 如果合适，可以埋下新的伏笔\n"
-                "4. 确保本章服务于主线剧情"
+                "【前文摘要】\n{last_summary}\n\n"
+                "【人物信息】\n{char_info}\n\n"
+                "【未回收伏笔/悬念】\n{threads_str}\n\n"
+                "【当前剧情点】\n{current_point_info}\n\n"
+                "请规划下一章详情：如果合适，推进或回收伏笔；也可埋下与主线相关的新伏笔。"
             ))
         ])
-        
-        input_data = {
-            "char_info": char_info,
-            "current_point_info": current_point_info,
-            "last_summary": last_summary,
-            "foreshadowing_section": threads_str,
-            "format_instructions": self.plan_parser.get_format_instructions()
-        }
-        
-        prompt_value = prompt.format_prompt(**input_data)
+
+        messages = prompt.format_messages(
+            last_summary=last_summary,
+            char_info=char_info,
+            threads_str=threads_str,
+            current_point_info=current_point_info,
+            format_instructions=self.plan_parser.get_format_instructions()
+        )
+
         try:
-            response = await self.llm.ainvoke(prompt_value.to_messages())
-            content_str = normalize_llm_content(response.content)
-            
-            # Rule 4.1: 使用工具函数过滤 <think> 标签
-            content_str = strip_think_tags(content_str)
-            
-            # 使用工具函数提取 JSON
+            response = await self.llm.ainvoke(messages)
+            content_str = strip_think_tags(normalize_llm_content(response.content))
             plan_json = extract_json_from_text(content_str)
-            
-            if plan_json:
+
+            if isinstance(plan_json, dict) and plan_json:
                 return {
-                    "scene": plan_json.get("scene_description") or plan_json.get("scene", "未知场景"),
-                    "conflict": plan_json.get("key_conflict") or plan_json.get("conflict", "未知冲突"),
-                    "instruction": plan_json.get("instruction", f"请继续写下一章。基于剧情点：{current_point_info}")
+                    "scene": plan_json.get("scene_description") or plan_json.get("scene") or "未知场景",
+                    "conflict": plan_json.get("key_conflict") or plan_json.get("conflict") or "未知冲突",
+                    "instruction": plan_json.get("instruction") or f"请继续写下一章。基于剧情点：{current_point_info}",
                 }
-            
+
             raise ValueError(f"Could not find JSON in response: {content_str}")
 
         except Exception as e:
             print(f"Plan Error: {e}")
-            # Fallback
             return {
                 "scene": "未知场景",
                 "conflict": "未知冲突",
-                "instruction": f"请继续写下一章。基于剧情点：{current_point_info}"
+                "instruction": f"请继续写下一章。基于剧情点：{current_point_info}",
             }
-
-    def _format_foreshadowing_for_planning(self, threads: List[str], analysis: Any) -> str:
-        """
-        格式化伏笔信息用于 Prompt
-        """
-        if not threads:
-            return "【未回收伏笔】：无"
-        
-        formatted = "【未回收伏笔/悬念】：\n"
-        for i, t in enumerate(threads, 1):
-            formatted += f"{i}. {t}\n"
-        
-        if analysis:
-             formatted += f"\n伏笔分析建议：{str(analysis)}\n"
-             
-        return formatted
