@@ -3,14 +3,11 @@ import argparse
 import sys
 import os
 
-# 将 src 目录添加到 sys.path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from graph import NGEGraph
-from db.base import SessionLocal
-from db.models import Novel
-from scripts.import_novel import import_novel_data
-from services.state_loader import load_initial_state
+from .graph import NGEGraph
+from .db.base import SessionLocal
+from .db.models import Novel
+from .scripts.import_novel import import_novel_data
+from .services.state_loader import load_initial_state
 
 async def run_generation_task(novel_id: int, branch_id: str = "main"):
     """为指定小说运行生成任务 (CLI 直接运行模式)"""
@@ -80,8 +77,4 @@ async def main():
         await run_generation_task(novel_id=args.novel_id, branch_id=args.branch)
 
 if __name__ == "__main__":
-    # 确保项目根目录在 sys.path 中
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
     asyncio.run(main())

@@ -10,7 +10,7 @@ from ..db.models import (
     NovelBible, Chapter as DBChapter, PlotOutline
 )
 from ..agents.evolver import CharacterEvolver
-from ..agents.summarizer import ChapterSummarizer
+from ..agents.summarizer import SummarizerAgent
 from ..monitoring import monitor
 from ..config import Config
 from .base import BaseNode
@@ -18,7 +18,7 @@ from .base import BaseNode
 logger = logging.getLogger(__name__)
 
 class EvolveNode(BaseNode):
-    def __init__(self, evolver: CharacterEvolver, summarizer: ChapterSummarizer):
+    def __init__(self, evolver: CharacterEvolver, summarizer: SummarizerAgent):
         self.evolver = evolver
         self.summarizer = summarizer
 
@@ -189,9 +189,9 @@ class EvolveNode(BaseNode):
             
             # 使用新的结构化摘要生成器
             try:
-                summary_result = await self.summarizer.generate_summary(
-                    state.current_draft, 
-                    state=state
+                summary_result = await self.summarizer.process(
+                    state,
+                    state.current_draft
                 )
                 chapter_entry.summary = summary_result.get("summary", state.current_draft[:200])
                 

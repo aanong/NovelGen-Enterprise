@@ -18,6 +18,11 @@ class VectorStore:
         self._db = db_session or SessionLocal()
         self.has_pgvector = self._check_pgvector()
 
+    def close(self):
+        """Close the database session."""
+        if self._db:
+            self._db.close()
+
     def _check_pgvector(self) -> bool:
         """Check if pgvector extension is available."""
         try:

@@ -1,10 +1,11 @@
 from ..schemas.state import NGEState, CharacterState
 from ..llms import get_llm
-from ..utils import normalize_llm_content, extract_json_from_text
+from ..utils import normalize_llm_content, extract_json_from_text, strip_think_tags
 from ..config import Config
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 

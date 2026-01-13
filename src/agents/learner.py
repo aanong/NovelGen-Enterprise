@@ -10,6 +10,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from dotenv import load_dotenv
 
 from dotenv import load_dotenv
+from .base import BaseAgent
 from ..db.base import SessionLocal
 from ..db.models import NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle
 from sqlalchemy.orm import Session

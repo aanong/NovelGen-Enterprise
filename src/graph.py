@@ -10,7 +10,7 @@ from .agents.writer import WriterAgent
 from .agents.reviewer import ReviewerAgent
 from .agents.style_analyzer import StyleAnalyzer
 from .agents.evolver import CharacterEvolver
-from .agents.summarizer import ChapterSummarizer
+from .agents.summarizer import SummarizerAgent
 from .agents.constants import NodeAction, ReviewDecision
 from .nodes import (
     LoadContextNode,
@@ -33,7 +33,7 @@ class NGEGraph:
         self.reviewer = ReviewerAgent()
         self.analyzer = StyleAnalyzer()
         self.evolver = CharacterEvolver()
-        self.summarizer = ChapterSummarizer()
+        self.summarizer = SummarizerAgent()
         
         # Instantiate nodes with dependencies
         self.load_context_node = LoadContextNode()
