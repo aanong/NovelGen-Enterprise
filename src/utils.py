@@ -1,12 +1,40 @@
 """
 NovelGen-Enterprise 工具函数库
 提供通用的辅助函数
+
+注意：LLM 响应处理函数已迁移到 src/core/llm_handler.py
+此文件保留向后兼容的导入和其他工具函数
 """
 import re
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .config import Config
+
+# 从 core 模块导入 LLM 处理函数（向后兼容）
+from .core.llm_handler import (
+    normalize_llm_content,
+    strip_think_tags,
+    extract_json_from_text,
+    LLMResponseHandler,
+)
+
+# 重新导出
+__all__ = [
+    "normalize_llm_content",
+    "strip_think_tags",
+    "extract_json_from_text",
+    "LLMResponseHandler",
+    "get_embedding",
+    "validate_character_consistency",
+    "analyze_sentence_length",
+    "check_scene_constraints",
+    "generate_chapter_summary",
+    "format_timestamp",
+    "calculate_intimacy_change",
+    "sanitize_filename",
+    "MockChatModel",
+]
 
 try:
     import google.generativeai as genai  # type: ignore
@@ -23,6 +51,12 @@ if genai is not None:
 def get_embedding(text: str) -> List[float]:
     """
     使用 Gemini 模型获取文本的 Embedding 向量
+    
+    Args:
+        text: 待向量化的文本
+        
+    Returns:
+        768 维的浮点向量
     """
     try:
         if genai is None:
@@ -36,75 +70,6 @@ def get_embedding(text: str) -> List[float]:
     except Exception:
         # Fallback for mock/test
         return [0.1] * 768
-
-
-def normalize_llm_content(content: Any) -> str:
-    """
-    Normalize LLM content which might be a string or a list of parts.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, str):
-                parts.append(part)
-            elif isinstance(part, dict) and "text" in part:
-                parts.append(part["text"])
-            elif hasattr(part, "text"):
-                parts.append(part.text)
-            else:
-                parts.append(str(part))
-        return "".join(parts)
-    return str(content)
-
-
-def strip_think_tags(content: str) -> str:
-    """
-    Rule 4.1: 清除 DeepSeek-R1 的 <think> 标签
-    
-    Args:
-        content: 原始内容
-    
-    Returns:
-        清理后的内容
-    """
-    return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
-
-
-def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """
-    从文本中提取 JSON 对象（容错处理）
-    
-    Args:
-        text: 包含 JSON 的文本
-    
-    Returns:
-        解析后的 JSON 对象，失败返回 None
-    """
-    # 先尝试直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    
-    # 尝试提取 JSON 块
-    json_match = re.search(r'(\{.*\})', text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            pass
-    
-    # 尝试提取代码块中的 JSON
-    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if code_block_match:
-        try:
-            return json.loads(code_block_match.group(1))
-        except json.JSONDecodeError:
-            pass
-    
-    return None
 
 
 def validate_character_consistency(

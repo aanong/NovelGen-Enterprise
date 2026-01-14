@@ -1,77 +1,84 @@
 """
 Agent 常量定义
 集中管理所有魔法字符串和数字
+
+注意：部分类型定义已迁移到 src/core/types.py
+此文件保留向后兼容的导入和额外的常量定义
 """
 from typing import Dict, Any
 
-# 场景类型
-class SceneType:
-    """场景类型常量"""
-    ACTION = "Action"
-    EMOTIONAL = "Emotional"
-    DIALOGUE = "Dialogue"
-    NORMAL = "Normal"
+# 从核心模块导入类型定义（向后兼容）
+from ..core.types import (
+    SceneType,
+    NodeAction,
+    ReviewDecision,
+    OutlineStatus,
+    ForeshadowingStatus,
+    ArcStatus,
+)
 
-
-# 节点动作
-class NodeAction:
-    """工作流节点动作常量"""
-    INIT = "init"
-    PLAN = "plan"
-    REFINE_CONTEXT = "refine_context"
-    WRITE = "write"
-    REVIEW = "review"
-    REVISE = "revise"
-    EVOLVE = "evolve"
-    REPAIR = "repair"
-    FINALIZE = "finalize"
-
-
-# 审核结果
-class ReviewDecision:
-    """审核决策常量"""
-    CONTINUE = "continue"
-    REVISE = "revise"
-    REPAIR = "repair"
-
-
-# 大纲状态
-class OutlineStatus:
-    """大纲状态常量"""
-    PENDING = "pending"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
+# 重新导出以保持向后兼容
+__all__ = [
+    "SceneType",
+    "NodeAction", 
+    "ReviewDecision",
+    "OutlineStatus",
+    "ForeshadowingStatus",
+    "ArcStatus",
+    "Defaults",
+    "PromptTemplates",
+    "ErrorMessages",
+    "SuccessMessages",
+]
 
 
 # 默认配置值
 class Defaults:
-    """默认配置值"""
-    # 章节相关
-    MIN_CHAPTER_LENGTH = 2000
-    TARGET_CHAPTER_LENGTH = 3000
-    MAX_CHAPTER_LENGTH = 5000
+    """
+    默认配置值
+    集中管理系统级别的默认参数
+    """
     
-    # 重试相关
-    MAX_RETRY_LIMIT = 3
-    RETRY_DELAY_SECONDS = 1
+    # ========== 章节相关 ==========
+    MIN_CHAPTER_LENGTH = 2000       # 最小章节长度
+    TARGET_CHAPTER_LENGTH = 3000    # 目标章节长度
+    MAX_CHAPTER_LENGTH = 5000       # 最大章节长度
     
-    # 上下文相关
-    RECENT_CHAPTERS_CONTEXT = 3
-    MAX_CONTEXT_CHAPTERS = 10
+    # ========== 重试相关 ==========
+    MAX_RETRY_LIMIT = 3             # 最大重试次数
+    RETRY_DELAY_SECONDS = 1         # 重试延迟秒数
     
-    # RAG 相关
-    BIBLE_SEARCH_TOP_K = 3
-    STYLE_SEARCH_TOP_K = 1
-    REFERENCE_SEARCH_TOP_K = 2
+    # ========== 上下文相关 ==========
+    RECENT_CHAPTERS_CONTEXT = 3     # 近期章节上下文数量
+    MAX_CONTEXT_CHAPTERS = 10       # 最大上下文章节数
     
-    # 逻辑审查
-    MIN_LOGIC_SCORE = 0.7
-    MAX_LOGIC_SCORE = 1.0
+    # ========== RAG 相关 ==========
+    BIBLE_SEARCH_TOP_K = 3          # 世界观检索数量
+    STYLE_SEARCH_TOP_K = 1          # 文风检索数量
+    REFERENCE_SEARCH_TOP_K = 2      # 参考资料检索数量
+    
+    # ========== 逻辑审查 ==========
+    MIN_LOGIC_SCORE = 0.7           # 最低逻辑评分
+    MAX_LOGIC_SCORE = 1.0           # 最高逻辑评分
+    
+    # ========== 节奏控制 ==========
+    RHYTHM_LOOKBACK_CHAPTERS = 5    # 节奏分析回看章节数
+    HIGH_INTENSITY_THRESHOLD = 7    # 高强度阈值
+    LOW_INTENSITY_THRESHOLD = 3     # 低强度阈值
+    CONSECUTIVE_HIGH_LIMIT = 3      # 连续高强度章节限制
+    CONSECUTIVE_LOW_LIMIT = 4       # 连续低强度章节限制
+    
+    # ========== 伏笔管理 ==========
+    FORESHADOWING_LOOKAHEAD = 3     # 伏笔到期提前提醒章节数
+    FORESHADOWING_OVERDUE_WARNING = True  # 是否开启过期警告
 
 
 # 提示词模板片段
 class PromptTemplates:
-    """提示词模板片段"""
+    """
+    提示词模板片段
+    用于构建 LLM 提示词的可复用组件
+    """
     
     # 反重力规则警告
     ANTIGRAVITY_WARNING = """
@@ -100,6 +107,31 @@ class PromptTemplates:
 - 风格要求：{preferred_style}
 - 禁忌模式：{forbidden_patterns}
 """
+    
+    # 伏笔管理提示
+    FORESHADOWING_TEMPLATE = """
+【伏笔管理要求】
+1. 推进策略：明确指出本章应推进哪些已有的存量伏笔
+2. 回收策略：如果剧情时机成熟，明确指出应在本章回收/揭晓的伏笔
+3. 埋线策略：根据主线需要，本章是否需要埋下新的伏笔或悬念
+"""
+    
+    # 节奏控制提示
+    RHYTHM_TEMPLATE = """
+【节奏控制要求】
+- 节奏强度：{intensity}/10 ({intensity_desc})
+- 节奏类型：{rhythm_type}
+- 情绪基调：{emotional_tone}
+- 避免模式：{avoid_patterns}
+"""
+    
+    # 语言风格提示
+    SPEECH_STYLE_TEMPLATE = """
+【{character_name}的语言风格】
+- 说话风格：{speech_pattern}
+- 口头禅：{verbal_tics}
+- 语气特点：{tone_modifiers}
+"""
 
 
 # 错误消息
@@ -110,6 +142,8 @@ class ErrorMessages:
     DATABASE_ERROR = "数据库操作失败"
     VALIDATION_ERROR = "输入验证失败"
     CONFIG_ERROR = "配置错误"
+    WORKFLOW_ERROR = "工作流执行失败"
+    ANTIGRAVITY_VIOLATION = "违反反重力规则"
 
 
 # 成功消息
@@ -119,3 +153,6 @@ class SuccessMessages:
     REVIEW_PASSED = "审核通过"
     EVOLUTION_COMPLETE = "人物演化完成"
     CONTEXT_LOADED = "上下文加载完成"
+    RHYTHM_ANALYZED = "节奏分析完成"
+    ALLUSION_RECOMMENDED = "典故推荐完成"
+    FORESHADOWING_PROCESSED = "伏笔处理完成"

@@ -3,20 +3,32 @@ Agent 基类模块
 提供统一的 Agent 接口和通用功能
 """
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypeVar, Type
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel
 from ..config import Config
 from ..utils import MockChatModel
+from ..core.llm_handler import LLMResponseHandler
+from ..core.exceptions import LLMParseError
 import logging
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T', bound=BaseModel)
 
 
 class BaseAgent(ABC):
     """
     Agent 基类
     提供统一的接口和 LLM 初始化逻辑
+    
+    功能：
+    1. 自动初始化 LLM 实例（支持 Gemini、DeepSeek、Mock）
+    2. 提供统一的响应处理方法
+    3. 提供日志和错误处理
+    4. 支持链式调用和模板化提示词
     """
     
     def __init__(
@@ -37,7 +49,10 @@ class BaseAgent(ABC):
         """
         self.model_name = model_name
         self.temperature = temperature
+        self._use_mock = use_mock
+        self._mock_responses = mock_responses
         self.llm = self._init_llm(use_mock, mock_responses)
+        self._call_count = 0
     
     def _init_llm(self, use_mock: bool, mock_responses: Optional[list]) -> Any:
         """
@@ -105,6 +120,98 @@ class BaseAgent(ABC):
         """
         pass
     
+    async def invoke_llm(
+        self,
+        prompt: ChatPromptTemplate,
+        variables: Dict[str, Any],
+        parse_json: bool = True
+    ) -> Dict[str, Any]:
+        """
+        调用 LLM 并处理响应
+        
+        Args:
+            prompt: 提示词模板
+            variables: 模板变量
+            parse_json: 是否解析 JSON
+            
+        Returns:
+            处理后的响应字典
+        """
+        self._call_count += 1
+        messages = prompt.format_messages(**variables)
+        
+        try:
+            response = await self.llm.ainvoke(messages)
+            result = LLMResponseHandler.process_response(response, extract_json=parse_json)
+            
+            if not result["success"] and parse_json:
+                logger.warning(f"{self.__class__.__name__} 无法解析 JSON 响应")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"{self.__class__.__name__} LLM 调用失败: {e}", exc_info=True)
+            return {
+                "raw": "",
+                "cleaned": "",
+                "json": None,
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def invoke_and_parse(
+        self,
+        prompt: ChatPromptTemplate,
+        variables: Dict[str, Any],
+        model_class: Type[T],
+        default: Optional[T] = None
+    ) -> Optional[T]:
+        """
+        调用 LLM 并解析为 Pydantic 模型
+        
+        Args:
+            prompt: 提示词模板
+            variables: 模板变量
+            model_class: 目标 Pydantic 模型类
+            default: 解析失败时的默认值
+            
+        Returns:
+            解析后的模型实例，或默认值
+        """
+        result = await self.invoke_llm(prompt, variables, parse_json=True)
+        
+        if result.get("json"):
+            try:
+                return model_class.model_validate(result["json"])
+            except Exception as e:
+                logger.warning(f"模型验证失败: {e}")
+        
+        return default
+    
+    def clean_response(self, content: Any) -> str:
+        """
+        清洗 LLM 响应
+        
+        Args:
+            content: 原始响应内容
+            
+        Returns:
+            清洗后的内容
+        """
+        return LLMResponseHandler.clean(content)
+    
+    def extract_json(self, text: str) -> Optional[Dict[str, Any]]:
+        """
+        从文本中提取 JSON
+        
+        Args:
+            text: 包含 JSON 的文本
+            
+        Returns:
+            解析后的 JSON 对象
+        """
+        return LLMResponseHandler.extract_json(text)
+    
     def validate_input(self, *args, **kwargs) -> bool:
         """
         验证输入参数（子类可重写）
@@ -129,5 +236,10 @@ class BaseAgent(ABC):
             "name": self.__class__.__name__,
             "model_name": self.model_name,
             "temperature": self.temperature,
-            "llm_type": type(self.llm).__name__
+            "llm_type": type(self.llm).__name__,
+            "call_count": self._call_count
         }
+    
+    def reset_stats(self):
+        """重置统计信息"""
+        self._call_count = 0

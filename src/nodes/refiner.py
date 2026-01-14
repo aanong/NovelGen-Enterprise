@@ -1,16 +1,31 @@
 import logging
 import asyncio
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from ..schemas.state import NGEState
 from ..agents.constants import NodeAction
 from ..db.vector_store import VectorStore
 from ..db.models import NovelBible, StyleRef, ReferenceMaterial
+from ..agents.allusion_advisor import AllusionAdvisor
 from .base import BaseNode
 
 logger = logging.getLogger(__name__)
 
 class RefineContextNode(BaseNode):
+    """
+    上下文精炼节点
+    负责 RAG 检索、典故注入等上下文增强
+    """
+    
+    def __init__(self, allusion_advisor: Optional[AllusionAdvisor] = None):
+        """
+        初始化上下文精炼节点
+        
+        Args:
+            allusion_advisor: 典故顾问（可选，为空则自动创建）
+        """
+        self.allusion_advisor = allusion_advisor or AllusionAdvisor()
+    
     async def __call__(self, state: NGEState) -> Dict[str, Any]:
         """上下文精炼 (增强的 RAG Implementation)"""
         print("--- REFINING CONTEXT VIA ENHANCED RAG ---")
@@ -68,13 +83,30 @@ class RefineContextNode(BaseNode):
             
             print(f"✅ 增强 RAG 检索完成。世界观:{len(bible_results)}, 文风:{len(style_results)}, 套路:{len(plot_tropes)}, 原型:{len(char_archetypes)}")
             
-            # 4. 更新 State 中的提示词
+            # 4. 典故主动注入（新增）
+            allusion_context = ""
+            try:
+                allusion_advice = await self.allusion_advisor.recommend_allusions(state)
+                if allusion_advice and allusion_advice.get("recommendations"):
+                    allusion_context = self.allusion_advisor.generate_injection_prompt(allusion_advice)
+                    rec_count = len(allusion_advice.get("recommendations", []))
+                    print(f"📚 典故推荐完成，推荐 {rec_count} 个典故")
+                    
+                    # 检查已使用警告
+                    warnings = allusion_advice.get("already_used_warnings", [])
+                    if warnings:
+                        print(f"⚠️ 典故重复警告: {', '.join(warnings[:2])}")
+            except Exception as e:
+                logger.warning(f"典故推荐跳过: {e}")
+            
+            # 5. 更新 State 中的提示词
             enhanced_instruction = (
                 f"{state.review_feedback}\n\n"
                 f"【参考世界观设定】\n{bible_context}\n"
                 f"{style_context}"
                 f"{plot_context}"
                 f"{archetype_context}"
+                f"{allusion_context}"
             )
             
             # 保存到 refined_context 供后续使用

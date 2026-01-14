@@ -120,15 +120,20 @@ class WriterAgent(BaseAgent):
         )
     
     def _build_character_context(self, state: NGEState) -> str:
-        """构建人物上下文"""
+        """
+        构建人物上下文
+        包含基础信息、语言风格和心理状态
+        """
         character_lines = []
+        speech_style_lines = []
+        psychology_lines = []
         
         for name, char in state.characters.items():
             # 获取禁忌行为
             forbidden = state.antigravity_context.character_anchors.get(name, [])
             forbidden_str = f"【禁止行为：{', '.join(forbidden)}】" if forbidden else ""
             
-            # 构建角色信息
+            # 构建角色基础信息
             char_info_parts = [
                 f"- {name}: {char.personality_traits.get('role', '')}",
                 f"性格:{char.personality_traits.get('personality', '')}",
@@ -154,8 +159,33 @@ class WriterAgent(BaseAgent):
                 char_info_parts.append(forbidden_str)
             
             character_lines.append(", ".join(char_info_parts))
+            
+            # ========== 构建语言风格指导（新增）==========
+            if hasattr(char, 'speech_style') and char.speech_style:
+                speech_prompt = char.speech_style.to_prompt_text(name)
+                if speech_prompt:
+                    speech_style_lines.append(speech_prompt)
+            
+            # ========== 构建心理状态指导（新增）==========
+            if hasattr(char, 'psychology') and char.psychology:
+                psychology_prompt = char.psychology.to_prompt_text(name)
+                if psychology_prompt:
+                    psychology_lines.append(psychology_prompt)
         
-        return "\n".join(character_lines)
+        # 组合完整的人物上下文
+        result_parts = ["\n".join(character_lines)]
+        
+        # 添加语言风格指导区块
+        if speech_style_lines:
+            result_parts.append("\n\n【人物语言风格指导】（写对话时必须遵循）")
+            result_parts.append("\n".join(speech_style_lines))
+        
+        # 添加心理描写指导区块
+        if psychology_lines:
+            result_parts.append("\n\n【人物心理描写指导】（进行心理描写时参考）")
+            result_parts.append("\n".join(psychology_lines))
+        
+        return "\n".join(result_parts)
     
     def _build_scene_rules(self, state: NGEState) -> str:
         """构建场景约束规则"""
