@@ -177,6 +177,12 @@ cp .env.example .env
 # 3. 启动所有服务
 docker-compose up -d
 
+# 4. 初始化/迁移数据库（只需首次或升级后执行一次）
+docker-compose exec app python -m src.db.init_db
+docker-compose exec app python -m src.scripts.migrate_db upgrade
+# 如需给 references 表补充 novel_id 字段（旧库升级）
+docker-compose exec app python -m src.scripts.manage_references migrate
+
 # 4. 查看服务状态
 docker-compose ps
 
@@ -277,7 +283,7 @@ DB_MAX_OVERFLOW=10
 ### 配置验证
 
 ```bash
-# 验证配置是否正确
+# 快速验证：打印关键配置，并检查必需项
 python -c "from src.config import Config; Config.print_config(); print(Config.validate())"
 ```
 
@@ -308,11 +314,11 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ### 数据库迁移
 
 ```bash
-# 使用 Alembic 进行迁移
-alembic upgrade head
+# 推荐：使用项目内置迁移脚本（会 create_all 并补齐索引/列）
+python -m src.scripts.migrate_db upgrade
 
-# 生成新的迁移文件
-alembic revision --autogenerate -m "描述"
+# 如需回滚（谨慎）
+python -m src.scripts.migrate_db downgrade
 ```
 
 ### 重置数据库
@@ -443,7 +449,7 @@ python -m src.main run --novel-id 1 --branch main
 
 ```bash
 # 启动生成任务
-curl -X POST "http://localhost:8000/api/generate/chapter" \
+curl -X POST "http://localhost:8000/api/generate/" \
   -H "Content-Type: application/json" \
   -d '{
     "novel_id": 1,
@@ -522,7 +528,7 @@ python -m src.scripts.export_novel --novel-id 1 --branch if_line_1 --output if_n
 | POST | `/api/outlines/` | 创建大纲 |
 | PUT | `/api/outlines/{id}` | 更新大纲 |
 | **生成任务** |||
-| POST | `/api/generate/chapter` | 启动章节生成任务 |
+| POST | `/api/generate/` | 启动章节生成任务 |
 | GET | `/api/generate/status/{task_id}` | 查询任务状态 |
 | GET | `/api/generate/stream/{task_id}` | SSE 实时流 |
 | **资料库** |||
@@ -595,7 +601,7 @@ python -m src.scripts.export_novel --novel-id <ID> [--output <文件>] [--branch
 
 # 管理资料库
 python -m src.scripts.manage_references import <JSON文件> [--novel-id <ID>] [--force]
-python -m src.scripts.manage_references list [--novel-id <ID>] [--category <类别>]
+python -m src.scripts.manage_references migrate
 
 # 数据库验证
 python -m src.scripts.verify_db
@@ -620,13 +626,13 @@ NGE 支持两级资料库：
 
 ```bash
 # 导入全局资料
-python -m src.scripts.manage_references import data/global_references.json
+python -m src.scripts.manage_references import ./my_references.json
 
 # 导入小说专属资料
-python -m src.scripts.manage_references import data/novel_1_refs.json --novel-id 1
+python -m src.scripts.manage_references import ./my_references.json --novel-id 1
 
 # 强制覆盖
-python -m src.scripts.manage_references import data/refs.json --force
+python -m src.scripts.manage_references import ./my_references.json --force
 ```
 
 ### 资料 JSON 格式
@@ -658,18 +664,9 @@ python -m src.scripts.manage_references import data/refs.json --force
 
 NGE 支持创建平行宇宙（IF 线），实现同一故事的不同发展方向。
 
-### 创建分支
+### 在新分支上生成
 
-```bash
-curl -X POST "http://localhost:8000/api/novels/1/branches" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "branch_id": "if_heroine_dies",
-    "parent_branch": "main",
-    "fork_chapter": 5,
-    "description": "女主在第五章牺牲的 IF 线"
-  }'
-```
+分支 ID 是一个字符串（例如 `main`、`if_heroine_dies`），直接在生成时指定即可。
 
 ### 在分支上生成
 
@@ -678,7 +675,7 @@ curl -X POST "http://localhost:8000/api/novels/1/branches" \
 python -m src.main run --novel-id 1 --branch if_heroine_dies
 
 # API
-curl -X POST "http://localhost:8000/api/generate/chapter" \
+curl -X POST "http://localhost:8000/api/generate/" \
   -H "Content-Type: application/json" \
   -d '{"novel_id": 1, "branch_id": "if_heroine_dies"}'
 ```
@@ -699,18 +696,13 @@ curl -X POST "http://localhost:8000/api/generate/chapter" \
 NovelGen-Enterprise/
 ├── src/
 │   ├── agents/                 # AI Agent 实现
-│   │   ├── __init__.py        # 模块导出
 │   │   ├── base.py            # Agent 基类
 │   │   ├── architect.py       # 大纲规划 Agent
+│   │   ├── learner.py         # 设定解析 Agent
 │   │   ├── writer.py          # 写作 Agent
 │   │   ├── reviewer.py        # 审核 Agent
 │   │   ├── evolver.py         # 人物演化 Agent
-│   │   ├── rhythm_analyzer.py # 节奏分析 Agent
 │   │   ├── style_analyzer.py  # 文风分析 Agent
-│   │   ├── allusion_advisor.py # 典故推荐 Agent（含验证功能）
-│   │   ├── writing_technique_advisor.py # 写作技法顾问 Agent [新增]
-│   │   ├── world_guard.py     # 世界观一致性守护 Agent [新增]
-│   │   ├── learner.py         # 学习 Agent
 │   │   ├── summarizer.py      # 摘要 Agent
 │   │   └── constants.py       # 常量定义
 │   │
@@ -727,9 +719,11 @@ NovelGen-Enterprise/
 │   │
 │   ├── db/                    # 数据库层
 │   │   ├── base.py           # 数据库连接
+│   │   ├── init_db.py        # 初始化建表/扩展
 │   │   ├── models.py         # ORM 模型
+│   │   ├── reset_db.py       # 重置数据库（危险）
 │   │   ├── vector_store.py   # 向量存储
-│   │   └── *_repository.py   # 仓储类
+│   │   └── ...
 │   │
 │   ├── nodes/                 # LangGraph 节点
 │   │   ├── __init__.py       # 模块导出
@@ -742,16 +736,16 @@ NovelGen-Enterprise/
 │   │   └── evolver.py        # 状态演化
 │   │
 │   ├── schemas/               # 数据模型
-│   │   ├── __init__.py       # 模块导出
 │   │   ├── state.py          # NGEState 全局状态（含价值观/成长系统）
-│   │   ├── style.py          # 文风模型（含视角/描写/氛围控制）[增强]
-│   │   └── literary.py       # 文学元素模型（典故/诗词/母题）[新增]
+│   │   └── style.py          # 文风模型
 │   │
 │   ├── scripts/               # 独立脚本
 │   │   ├── import_novel.py   # 导入设定
 │   │   ├── export_novel.py   # 导出小说
 │   │   ├── generate_outline.py # 生成大纲
-│   │   └── manage_references.py # 资料库管理
+│   │   ├── manage_references.py # 资料库管理/迁移
+│   │   ├── migrate_db.py     # 数据库迁移
+│   │   └── ...
 │   │
 │   ├── services/              # 业务逻辑层
 │   │   ├── novel_service.py
@@ -762,10 +756,8 @@ NovelGen-Enterprise/
 │   ├── config.py              # 配置管理
 │   ├── graph.py               # LangGraph 工作流
 │   ├── main.py                # CLI 入口
+│   ├── run_server.py           # API 启动入口（便于 Docker）
 │   └── worker.py              # Celery Worker
-│
-├── data/                      # 数据文件
-│   └── global_references.json # 全局资料库
 │
 ├── sample_inputs/             # 示例输入
 │   └── novel_setup.txt        # 示例设定文档

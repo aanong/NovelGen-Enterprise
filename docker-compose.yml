@@ -14,7 +14,7 @@ services:
     depends_on:
       - db
       - redis
-    command: python -m src.api.run_server
+    command: python -m src.run_server
     networks:
       - novelgen-net
 
