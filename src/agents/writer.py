@@ -122,11 +122,12 @@ class WriterAgent(BaseAgent):
     def _build_character_context(self, state: NGEState) -> str:
         """
         构建人物上下文
-        包含基础信息、语言风格和心理状态
+        包含基础信息、语言风格、心理状态和价值观约束
         """
         character_lines = []
         speech_style_lines = []
         psychology_lines = []
+        value_lines = []
         
         for name, char in state.characters.items():
             # 获取禁忌行为
@@ -160,17 +161,35 @@ class WriterAgent(BaseAgent):
             
             character_lines.append(", ".join(char_info_parts))
             
-            # ========== 构建语言风格指导（新增）==========
+            # ========== 构建语言风格指导 ==========
             if hasattr(char, 'speech_style') and char.speech_style:
                 speech_prompt = char.speech_style.to_prompt_text(name)
                 if speech_prompt:
                     speech_style_lines.append(speech_prompt)
             
-            # ========== 构建心理状态指导（新增）==========
+            # ========== 构建心理状态指导 ==========
             if hasattr(char, 'psychology') and char.psychology:
                 psychology_prompt = char.psychology.to_prompt_text(name)
                 if psychology_prompt:
                     psychology_lines.append(psychology_prompt)
+            
+            # ========== 构建价值观约束（新增）==========
+            if hasattr(char, 'value_system') and char.value_system:
+                value_prompt = char.value_system.to_prompt_text(name)
+                if value_prompt:
+                    value_lines.append(value_prompt)
+                
+                # 提取道德底线作为额外禁忌
+                if char.value_system.moral_absolutes:
+                    moral_forbidden = [f"违背'{a}'" for a in char.value_system.moral_absolutes]
+                    if moral_forbidden:
+                        value_lines.append(f"【{name}的道德禁忌】：{', '.join(moral_forbidden)}")
+                
+                # 检查是否有活跃的价值冲突
+                if char.value_system.active_conflicts:
+                    conflict = char.value_system.active_conflicts[0]
+                    conflict_str = f"【{name}当前两难】：{' vs '.join(conflict.values_in_conflict)} - {conflict.situation}"
+                    value_lines.append(conflict_str)
         
         # 组合完整的人物上下文
         result_parts = ["\n".join(character_lines)]
@@ -184,6 +203,11 @@ class WriterAgent(BaseAgent):
         if psychology_lines:
             result_parts.append("\n\n【人物心理描写指导】（进行心理描写时参考）")
             result_parts.append("\n".join(psychology_lines))
+        
+        # 添加价值观约束区块（新增）
+        if value_lines:
+            result_parts.append("\n\n【人物价值观约束】（行为决策必须考虑）")
+            result_parts.append("\n".join(value_lines))
         
         return "\n".join(result_parts)
     

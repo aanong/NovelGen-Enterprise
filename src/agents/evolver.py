@@ -1,11 +1,13 @@
 """
 CharacterEvolver Agent 模块
 负责分析章节内容，触发人物性格、能力、价值观的动态演化
-支持：自动分析 + 关键事件触发 + 人物弧光推进
+支持：自动分析 + 关键事件触发 + 人物弧光推进 + 成长系统管理
 """
 from ..schemas.state import (
     NGEState, CharacterState, KeyEventType, KeyEventSchema,
-    AbilityLevel, CharacterArcSchema, ArcType
+    AbilityLevel, CharacterArcSchema, ArcType,
+    MasteryStage, GrowthCurveType, GrowthMilestone,
+    CharacterGrowthSystem, MindsetDimension
 )
 from ..utils import normalize_llm_content, extract_json_from_text, strip_think_tags
 from ..config import Config
@@ -58,6 +60,22 @@ class DetectedKeyEvent(BaseModel):
     )
 
 
+class MindsetChange(BaseModel):
+    """思想维度变化"""
+    dimension: str = Field(description="维度名称：openness/depth/emotional_maturity/empathy/decisiveness/resilience/insight")
+    old_value: float = Field(description="原始值 0.0-1.0")
+    new_value: float = Field(description="新值 0.0-1.0")
+    reason: str = Field(description="变化原因")
+
+
+class GrowthEvent(BaseModel):
+    """成长事件"""
+    event_type: str = Field(description="事件类型：breakthrough/bottleneck/insight/regression")
+    description: str = Field(description="事件描述")
+    affected_abilities: List[str] = Field(default_factory=list, description="影响的能力")
+    is_major: bool = Field(default=False, description="是否为重大成长事件")
+
+
 class CharacterEvolution(BaseModel):
     """单个人物的完整演化报告"""
     character_name: str = Field(description="角色姓名")
@@ -103,6 +121,27 @@ class CharacterEvolution(BaseModel):
     arc_milestone_completed: bool = Field(
         default=False,
         description="是否完成了当前里程碑"
+    )
+    
+    # ========== 新增：思想成长 ==========
+    mindset_changes: List[MindsetChange] = Field(
+        default_factory=list,
+        description="思想维度的变化列表"
+    )
+    
+    growth_events: List[GrowthEvent] = Field(
+        default_factory=list,
+        description="本章发生的成长事件"
+    )
+    
+    growth_theme_update: Optional[str] = Field(
+        None,
+        description="成长主题更新"
+    )
+    
+    mastery_stage_changes: Dict[str, str] = Field(
+        default_factory=dict,
+        description="技能掌握阶段变化，如：{'剑法': 'competent -> proficient'}"
     )
     
     # 演化总结
@@ -451,7 +490,8 @@ def apply_ability_change(
         new_abilities[change.ability_name] = AbilityLevel(
             level=change.new_level or 1,
             proficiency=change.new_proficiency or 0.1,
-            description=change.description
+            description=change.description,
+            mastery_stage=MasteryStage.NOVICE
         )
     elif change.ability_name in new_abilities:
         ability = new_abilities[change.ability_name]
@@ -460,11 +500,224 @@ def apply_ability_change(
             ability.level = min(10, change.new_level)
             # 升级时重置熟练度
             ability.proficiency = 0.0
+            # 更新掌握阶段
+            ability.mastery_stage = _calculate_mastery_stage(ability.level)
             
         elif change.change_type == "proficiency" and change.new_proficiency is not None:
             ability.proficiency = min(1.0, change.new_proficiency)
         
         if change.description:
             ability.description = change.description
+        
+        # 记录成长历史
+        ability.growth_history.append({
+            "type": change.change_type,
+            "value": change.new_level or change.new_proficiency
+        })
     
     return new_abilities
+
+
+def _calculate_mastery_stage(level: int) -> MasteryStage:
+    """根据等级计算掌握阶段"""
+    if level <= 1:
+        return MasteryStage.NOVICE
+    elif level <= 3:
+        return MasteryStage.COMPETENT
+    elif level <= 5:
+        return MasteryStage.PROFICIENT
+    elif level <= 8:
+        return MasteryStage.MASTER
+    else:
+        return MasteryStage.TRANSCENDENT
+
+
+def apply_mindset_change(
+    current_mindset: MindsetDimension,
+    change: MindsetChange,
+    max_change: float = 0.2
+) -> MindsetDimension:
+    """
+    应用思想维度变化
+    
+    Args:
+        current_mindset: 当前思想维度
+        change: 要应用的变化
+        max_change: 单次最大变化量
+        
+    Returns:
+        更新后的思想维度
+    """
+    # 创建副本
+    new_mindset = current_mindset.model_copy()
+    
+    # 获取当前值
+    dimension_name = change.dimension.lower()
+    if hasattr(new_mindset, dimension_name):
+        current_value = getattr(new_mindset, dimension_name)
+        
+        # 计算变化量
+        delta = change.new_value - change.old_value
+        delta = max(-max_change, min(max_change, delta))
+        
+        # 应用变化
+        new_value = max(0.0, min(1.0, current_value + delta))
+        setattr(new_mindset, dimension_name, new_value)
+    
+    return new_mindset
+
+
+def process_growth_event(
+    growth_system: CharacterGrowthSystem,
+    event: GrowthEvent,
+    chapter: int
+) -> CharacterGrowthSystem:
+    """
+    处理成长事件
+    
+    Args:
+        growth_system: 当前成长系统
+        event: 成长事件
+        chapter: 当前章节
+        
+    Returns:
+        更新后的成长系统
+    """
+    # 记录里程碑
+    growth_system.record_milestone(
+        milestone_type=event.event_type,
+        chapter=chapter,
+        description=event.description,
+        is_major=event.is_major
+    )
+    
+    # 处理不同类型的事件
+    if event.event_type == "breakthrough":
+        # 突破 - 移除阻碍
+        if growth_system.growth_blockers:
+            growth_system.growth_blockers.pop(0)
+    
+    elif event.event_type == "bottleneck":
+        # 遇到瓶颈 - 添加阻碍
+        growth_system.growth_blockers.append(event.description)
+    
+    elif event.event_type == "insight":
+        # 顿悟 - 提升领悟力
+        growth_system.mindset.insight = min(1.0, growth_system.mindset.insight + 0.1)
+    
+    elif event.event_type == "regression":
+        # 退步 - 降低某些维度
+        growth_system.mindset.resilience = max(0.0, growth_system.mindset.resilience - 0.05)
+    
+    return growth_system
+
+
+def apply_evolution_to_character(
+    character: CharacterState,
+    evolution: CharacterEvolution,
+    chapter: int = 0
+) -> CharacterState:
+    """
+    将演化结果完整应用到角色状态
+    
+    Args:
+        character: 当前角色状态
+        evolution: 演化结果
+        chapter: 当前章节号
+        
+    Returns:
+        更新后的角色状态
+    """
+    # 1. 更新心情
+    if evolution.mood_change:
+        character.current_mood = evolution.mood_change
+    
+    # 2. 应用性格维度变化
+    for change in evolution.personality_changes:
+        character.personality_dynamics = apply_personality_change(
+            character.personality_dynamics, change
+        )
+    
+    # 3. 应用价值观变化
+    for change in evolution.value_changes:
+        character.core_values = apply_value_change(
+            character.core_values, change
+        )
+    
+    # 4. 应用能力变化
+    for change in evolution.ability_changes:
+        character.ability_levels = apply_ability_change(
+            character.ability_levels, change
+        )
+        
+        # 更新驾驭曲线
+        if hasattr(character, 'growth_system') and character.growth_system:
+            ability = character.ability_levels.get(change.ability_name)
+            if ability:
+                character.growth_system.update_proficiency_curve(
+                    change.ability_name, 
+                    ability.proficiency
+                )
+    
+    # 5. 添加新技能
+    for skill in evolution.skill_update:
+        if skill not in character.skills:
+            character.skills.append(skill)
+    
+    # 6. 更新关系
+    for target, change in evolution.relationship_change.items():
+        character.relationships[target] = change
+    
+    # 7. 更新状态（可扩展）
+    if evolution.status_change:
+        for key, value in evolution.status_change.items():
+            pass
+    
+    # 8. 推进弧光进度
+    if hasattr(character, 'character_arc') and character.character_arc:
+        if evolution.arc_progress_delta > 0:
+            character.character_arc.progress = min(
+                1.0,
+                character.character_arc.progress + evolution.arc_progress_delta
+            )
+            
+            if evolution.arc_milestone_completed:
+                _advance_arc_milestone(character.character_arc)
+    
+    # ========== 新增：思想成长处理 ==========
+    
+    # 9. 应用思想维度变化
+    if hasattr(character, 'growth_system') and character.growth_system:
+        for mc in evolution.mindset_changes:
+            character.growth_system.mindset = apply_mindset_change(
+                character.growth_system.mindset, mc
+            )
+        
+        # 10. 处理成长事件
+        for event in evolution.growth_events:
+            character.growth_system = process_growth_event(
+                character.growth_system, event, chapter
+            )
+        
+        # 11. 更新成长主题
+        if evolution.growth_theme_update:
+            character.growth_system.current_growth_theme = evolution.growth_theme_update
+        
+        # 12. 更新技能掌握阶段
+        for skill_name, stage_change in evolution.mastery_stage_changes.items():
+            if skill_name in character.ability_levels:
+                if " -> " in stage_change:
+                    _, new_stage_str = stage_change.split(" -> ")
+                    try:
+                        new_stage = MasteryStage(new_stage_str.strip())
+                        character.ability_levels[skill_name].mastery_stage = new_stage
+                    except ValueError:
+                        pass
+    
+    return character
+
+
+def _advance_arc_milestone(arc: CharacterArcSchema):
+    """推进弧光里程碑"""
+    if arc.milestones and arc.current_milestone_index < len(arc.milestones) - 1:
+        arc.current_milestone_index += 1

@@ -1,7 +1,7 @@
 """
 AllusionAdvisor Agent 模块
 负责典故主动注入与追踪
-支持典故推荐、变体应用建议、使用追踪
+支持典故推荐、变体应用建议、使用追踪、使用验证
 """
 import json
 from typing import List, Dict, Any, Optional
@@ -10,6 +10,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 
 from ..schemas.state import NGEState
+from ..schemas.literary import (
+    LiteraryElement, LiteraryElementType, AllusionDetail,
+    PoetryQuote, NarrativeMotif, AllusionUsageValidation,
+    PRESET_ALLUSIONS, PRESET_POETRY, PRESET_MOTIFS,
+    EmotionalCategory, CulturalContext
+)
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from ..db.vector_store import VectorStore
@@ -422,3 +428,294 @@ class AllusionAdvisor(BaseAgent):
             "by_type": by_type,
             "by_chapter": by_chapter
         }
+    
+    # ============ 新增：典故验证系统 ============
+    
+    async def validate_allusion_usage(
+        self,
+        content: str,
+        expected_allusions: List[str],
+        scene_context: str = ""
+    ) -> List[AllusionUsageValidation]:
+        """
+        验证典故是否被正确使用
+        
+        Args:
+            content: 章节内容
+            expected_allusions: 预期使用的典故列表
+            scene_context: 场景上下文
+            
+        Returns:
+            验证结果列表
+        """
+        if not expected_allusions:
+            return []
+        
+        prompt = self._create_validation_prompt()
+        
+        # 获取典故详情
+        allusion_details = self._get_allusion_details(expected_allusions)
+        
+        messages = prompt.format_messages(
+            content=content[:5000],  # 限制长度
+            allusion_details=allusion_details,
+            scene_context=scene_context
+        )
+        
+        try:
+            response = await self.llm.ainvoke(messages)
+            result_content = strip_think_tags(normalize_llm_content(response.content))
+            
+            result_json = extract_json_from_text(result_content)
+            if isinstance(result_json, dict) and "validations" in result_json:
+                validations = []
+                for v in result_json["validations"]:
+                    try:
+                        validations.append(AllusionUsageValidation.model_validate(v))
+                    except Exception:
+                        pass
+                return validations
+            
+            return []
+            
+        except Exception as e:
+            print(f"典故验证失败: {e}")
+            return []
+    
+    def _create_validation_prompt(self) -> ChatPromptTemplate:
+        """创建验证提示词"""
+        return ChatPromptTemplate.from_messages([
+            ("system", (
+                "你是一个文学专家，专门验证典故在文本中的使用质量。\n\n"
+                "【验证标准】\n"
+                "1. 典故是否被正确融入文本（而非生硬堆砌）\n"
+                "2. 使用方式是否恰当（直接引用/改编/反用/暗用/化用）\n"
+                "3. 与场景的契合度（是否适合当前情境）\n"
+                "4. 自然度评分（读者是否会觉得突兀）\n\n"
+                "输出必须是 JSON 格式：\n"
+                "```json\n"
+                "{\n"
+                '  "validations": [\n'
+                "    {\n"
+                '      "allusion_title": "典故名",\n'
+                '      "is_correct": true/false,\n'
+                '      "detected_usage_type": "使用方式",\n'
+                '      "naturalness_score": 0.0-1.0,\n'
+                '      "fit_score": 0.0-1.0,\n'
+                '      "issues": ["问题1"],\n'
+                '      "suggestions": ["建议1"]\n'
+                "    }\n"
+                "  ]\n"
+                "}\n"
+                "```"
+            )),
+            ("human", (
+                "【待验证文本】\n{content}\n\n"
+                "【预期典故及详情】\n{allusion_details}\n\n"
+                "【场景上下文】\n{scene_context}\n\n"
+                "请验证这些典故的使用质量。"
+            ))
+        ])
+    
+    def _get_allusion_details(self, allusion_titles: List[str]) -> str:
+        """获取典故详情用于验证"""
+        details = []
+        
+        for title in allusion_titles:
+            # 从预置库查找
+            found = None
+            for allusion in PRESET_ALLUSIONS:
+                if allusion.title == title:
+                    found = allusion
+                    break
+            
+            if found:
+                details.append(
+                    f"【{found.title}】\n"
+                    f"  来源：{found.origin}\n"
+                    f"  核心含义：{found.core_meaning}\n"
+                    f"  常见误用：{', '.join(found.common_misuses)}"
+                )
+            else:
+                details.append(f"【{title}】（无详细信息）")
+        
+        return "\n".join(details)
+    
+    # ============ 新增：预置库检索 ============
+    
+    def search_preset_allusions(
+        self,
+        emotion: Optional[EmotionalCategory] = None,
+        theme: Optional[str] = None,
+        limit: int = 5
+    ) -> List[AllusionDetail]:
+        """
+        从预置典故库中搜索
+        
+        Args:
+            emotion: 情感类型
+            theme: 主题关键词
+            limit: 最大返回数量
+            
+        Returns:
+            匹配的典故列表
+        """
+        results = []
+        
+        for allusion in PRESET_ALLUSIONS:
+            score = 0
+            
+            if emotion and emotion in allusion.emotions:
+                score += 2
+            
+            if theme:
+                # 简单的关键词匹配
+                theme_lower = theme.lower()
+                if theme_lower in allusion.core_meaning.lower():
+                    score += 1
+                if theme_lower in allusion.original_story.lower():
+                    score += 1
+            
+            if score > 0:
+                results.append((score, allusion))
+        
+        # 按分数排序
+        results.sort(key=lambda x: x[0], reverse=True)
+        
+        return [a for _, a in results[:limit]]
+    
+    def search_preset_poetry(
+        self,
+        mood: Optional[EmotionalCategory] = None,
+        imagery: Optional[str] = None,
+        limit: int = 5
+    ) -> List[PoetryQuote]:
+        """
+        从预置诗词库中搜索
+        
+        Args:
+            mood: 意境情感
+            imagery: 意象关键词
+            limit: 最大返回数量
+            
+        Returns:
+            匹配的诗句列表
+        """
+        results = []
+        
+        for poetry in PRESET_POETRY:
+            score = 0
+            
+            if mood and poetry.mood == mood:
+                score += 2
+            
+            if imagery:
+                imagery_lower = imagery.lower()
+                for img in poetry.imagery:
+                    if imagery_lower in img.lower():
+                        score += 1
+                        break
+            
+            if score > 0:
+                results.append((score, poetry))
+        
+        results.sort(key=lambda x: x[0], reverse=True)
+        
+        return [p for _, p in results[:limit]]
+    
+    def get_motif_by_name(self, name: str) -> Optional[NarrativeMotif]:
+        """
+        根据名称获取叙事母题
+        
+        Args:
+            name: 母题名称
+            
+        Returns:
+            叙事母题对象
+        """
+        for motif in PRESET_MOTIFS:
+            if name in motif.name:
+                return motif
+        return None
+    
+    def recommend_literary_elements(
+        self,
+        state: NGEState,
+        element_types: List[LiteraryElementType] = None
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        综合推荐文学元素（典故、诗词、母题）
+        
+        Args:
+            state: 当前状态
+            element_types: 要推荐的元素类型
+            
+        Returns:
+            分类的推荐结果
+        """
+        if element_types is None:
+            element_types = [
+                LiteraryElementType.ALLUSION,
+                LiteraryElementType.POETRY,
+                LiteraryElementType.MOTIF
+            ]
+        
+        # 分析当前情感
+        current_emotion = self._detect_emotion(state)
+        
+        results = {}
+        
+        if LiteraryElementType.ALLUSION in element_types:
+            allusions = self.search_preset_allusions(emotion=current_emotion, limit=3)
+            results["allusions"] = [
+                {
+                    "title": a.title,
+                    "core_meaning": a.core_meaning,
+                    "usage_example": a.usage_examples.get("implicit", "")
+                }
+                for a in allusions
+            ]
+        
+        if LiteraryElementType.POETRY in element_types:
+            poetry = self.search_preset_poetry(mood=current_emotion, limit=3)
+            results["poetry"] = [
+                {
+                    "quote": p.quote,
+                    "author": p.author,
+                    "adaptation": p.adaptation_example
+                }
+                for p in poetry
+            ]
+        
+        if LiteraryElementType.MOTIF in element_types:
+            results["motifs"] = [
+                {
+                    "name": m.name,
+                    "description": m.description[:100]
+                }
+                for m in PRESET_MOTIFS[:2]
+            ]
+        
+        return results
+    
+    def _detect_emotion(self, state: NGEState) -> Optional[EmotionalCategory]:
+        """从状态中检测当前情感"""
+        # 简单的情感检测逻辑
+        if state.current_plot_index < len(state.plot_progress):
+            plot = state.plot_progress[state.current_plot_index]
+            desc = plot.description.lower()
+            
+            emotion_keywords = {
+                EmotionalCategory.PARTING: ["离别", "分离", "告别"],
+                EmotionalCategory.REVENGE: ["复仇", "报仇", "仇恨"],
+                EmotionalCategory.SORROW: ["悲伤", "痛苦", "失去"],
+                EmotionalCategory.HOPE: ["希望", "转机", "新生"],
+                EmotionalCategory.AMBITION: ["雄心", "壮志", "征服"],
+            }
+            
+            for emotion, keywords in emotion_keywords.items():
+                for kw in keywords:
+                    if kw in desc:
+                        return emotion
+        
+        return None
