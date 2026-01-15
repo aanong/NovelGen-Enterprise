@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .base import SessionLocal
 from .models import NovelBible, StyleRef, ReferenceMaterial
 from ..utils import get_embedding
+from ..core.cache import get_cache_manager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,12 +25,44 @@ class VectorStore:
             self._db.close()
 
     def _check_pgvector(self) -> bool:
-        """Check if pgvector extension is available."""
+        """
+        检查 pgvector 扩展是否可用
+        
+        Returns:
+            是否可用
+        """
         try:
             self._db.execute(text("SELECT '[]'::vector"))
             return True
         except Exception:
             self._db.rollback()
+            return False
+    
+    def check_vector_index(self, table_name: str, column_name: str = "embedding") -> bool:
+        """
+        检查向量索引是否存在
+        
+        Args:
+            table_name: 表名
+            column_name: 向量列名，默认 "embedding"
+            
+        Returns:
+            索引是否存在
+        """
+        try:
+            # 查询索引是否存在
+            query = text("""
+                SELECT COUNT(*) 
+                FROM pg_indexes 
+                WHERE tablename = :table_name 
+                AND indexdef LIKE '%' || :column_name || '%'
+                AND indexdef LIKE '%vector%'
+            """)
+            result = self._db.execute(query, {"table_name": table_name, "column_name": column_name})
+            count = result.scalar()
+            return count > 0
+        except Exception as e:
+            logger.warning(f"检查向量索引失败: {e}")
             return False
 
     def _cosine_similarity(self, v1: List[float], v2: List[float]) -> float:
@@ -48,7 +81,8 @@ class VectorStore:
         model_class: Type[Union[ReferenceMaterial, NovelBible, StyleRef]] = ReferenceMaterial,
         top_k: int = 3, 
         filters: Optional[Dict[str, Any]] = None,
-        novel_id: Optional[int] = None
+        novel_id: Optional[int] = None,
+        use_cache: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Generic search method for any model with an embedding column.
@@ -61,8 +95,28 @@ class VectorStore:
             novel_id: Optional novel_id for scoping. 
                       For ReferenceMaterial, it searches (novel_id OR global).
                       For others, it typically searches (novel_id only).
+            use_cache: 是否使用查询结果缓存，默认 True
+        
+        Returns:
+            检索结果列表
         """
-        query_vector = get_embedding(query)
+        # 尝试从缓存获取
+        if use_cache:
+            try:
+                cache_manager = get_cache_manager()
+                cached_results = await cache_manager.get_vector_search_result(
+                    query=query,
+                    model_class=model_class.__name__,
+                    top_k=top_k,
+                    novel_id=novel_id
+                )
+                if cached_results:
+                    logger.debug(f"向量检索缓存命中: {model_class.__name__}")
+                    return cached_results
+            except Exception as e:
+                logger.debug(f"缓存查询失败: {e}")
+        
+        query_vector = await get_embedding(query)
         if not query_vector:
             logger.warning("Failed to generate embedding for query.")
             return []
@@ -107,7 +161,11 @@ class VectorStore:
             q = self._db.query(model_class)
             if db_filters:
                 q = q.filter(*db_filters)
-            all_items = q.all()
+            
+            # 优化：限制查询数量，避免加载所有记录
+            from ..agents.constants import Defaults
+            max_fallback_items = Defaults.MAX_FALLBACK_ITEMS
+            all_items = q.limit(max_fallback_items).all()
             
             scored_results = []
             for item in all_items:
@@ -115,16 +173,33 @@ class VectorStore:
                     sim = self._cosine_similarity(query_vector, item.embedding)
                     
                     # Boost priority for novel-specific items over global ones
+                    from ..agents.constants import Defaults
                     priority = 1.0
                     if model_class == ReferenceMaterial and item.novel_id:
-                        priority = 1.2 # Give a slight boost to local items
+                        priority = Defaults.NOVEL_SPECIFIC_PRIORITY_BOOST
                     
                     scored_results.append((sim * priority, item))
             
             scored_results.sort(key=lambda x: x[0], reverse=True)
             top_items = [item for _, item in scored_results[:top_k]]
             
-            return self._format_results(top_items, model_class)
+            results = self._format_results(top_items, model_class)
+            
+            # 保存到缓存
+            if use_cache:
+                try:
+                    cache_manager = get_cache_manager()
+                    await cache_manager.set_vector_search_result(
+                        query=query,
+                        model_class=model_class.__name__,
+                        results=results,
+                        top_k=top_k,
+                        novel_id=novel_id
+                    )
+                except Exception as e:
+                    logger.debug(f"保存缓存失败: {e}")
+            
+            return results
             
         except Exception as e:
             logger.error(f"Fallback search failed: {e}")

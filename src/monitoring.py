@@ -4,19 +4,41 @@
 """
 import time
 import functools
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, List, Optional
 from datetime import datetime
 import json
 from pathlib import Path
+import statistics
 
 
 class PerformanceMonitor:
-    """性能监控器"""
+    """
+    性能监控器
+    追踪 Agent 执行时间、Token 消耗、成本等指标
+    """
+    
+    # 模型价格配置（每 1M tokens，单位：美元）
+    MODEL_PRICING = {
+        "gemini": {
+            "input": 0.50,   # $0.50 per 1M input tokens
+            "output": 1.50   # $1.50 per 1M output tokens
+        },
+        "deepseek": {
+            "input": 0.14,   # $0.14 per 1M input tokens
+            "output": 0.28  # $0.28 per 1M output tokens
+        }
+    }
     
     def __init__(self, log_file: str = ".performance_log.json"):
         self.log_file = Path(log_file)
         self.metrics: Dict[str, Any] = {
-            "sessions": []
+            "sessions": [],
+            "token_usage": {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cost_usd": 0.0
+            },
+            "latency_stats": []  # 存储所有延迟数据用于计算百分位数
         }
         self._load_metrics()
     
@@ -55,10 +77,23 @@ class PerformanceMonitor:
         session_id: int,
         agent_name: str,
         duration: float,
-        token_count: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        model_name: str = "gemini",
         success: bool = True
     ):
-        """记录 Agent 调用"""
+        """
+        记录 Agent 调用（增强版：支持输入/输出 token 分别记录）
+        
+        Args:
+            session_id: 会话 ID
+            agent_name: Agent 名称
+            duration: 执行时间（秒）
+            input_tokens: 输入 token 数量
+            output_tokens: 输出 token 数量
+            model_name: 模型名称（用于成本计算）
+            success: 是否成功
+        """
         if session_id >= len(self.metrics["sessions"]):
             return
         
@@ -68,14 +103,32 @@ class PerformanceMonitor:
             session["agents"][agent_name] = {
                 "calls": 0,
                 "total_time": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
                 "total_tokens": 0,
-                "failures": 0
+                "total_cost_usd": 0.0,
+                "failures": 0,
+                "latencies": []  # 存储延迟数据
             }
         
         agent_stats = session["agents"][agent_name]
         agent_stats["calls"] += 1
         agent_stats["total_time"] += duration
-        agent_stats["total_tokens"] += token_count
+        agent_stats["total_input_tokens"] += input_tokens
+        agent_stats["total_output_tokens"] += output_tokens
+        agent_stats["total_tokens"] += input_tokens + output_tokens
+        agent_stats["latencies"].append(duration)
+        
+        # 计算成本
+        pricing = self.MODEL_PRICING.get(model_name, self.MODEL_PRICING["gemini"])
+        cost = (input_tokens / 1_000_000 * pricing["input"]) + (output_tokens / 1_000_000 * pricing["output"])
+        agent_stats["total_cost_usd"] += cost
+        
+        # 更新全局统计
+        self.metrics["token_usage"]["total_input_tokens"] += input_tokens
+        self.metrics["token_usage"]["total_output_tokens"] += output_tokens
+        self.metrics["token_usage"]["total_cost_usd"] += cost
+        self.metrics["latency_stats"].append(duration)
         
         if not success:
             agent_stats["failures"] += 1
@@ -128,13 +181,26 @@ class PerformanceMonitor:
                 agent_stats[agent_name]["total_tokens"] += stats.get("total_tokens", 0)
                 agent_stats[agent_name]["total_failures"] += stats.get("failures", 0)
         
+        # 计算延迟百分位数
+        latencies = self.metrics.get("latency_stats", [])
+        latency_percentiles = {}
+        if latencies:
+            sorted_latencies = sorted(latencies)
+            latency_percentiles = {
+                "p50": sorted_latencies[int(len(sorted_latencies) * 0.5)],
+                "p95": sorted_latencies[int(len(sorted_latencies) * 0.95)],
+                "p99": sorted_latencies[int(len(sorted_latencies) * 0.99)]
+            }
+        
         return {
             "total_chapters": total_sessions,
             "successful_chapters": successful_sessions,
             "success_rate": f"{successful_sessions / total_sessions * 100:.1f}%" if total_sessions > 0 else "N/A",
             "avg_time_per_chapter": f"{avg_time:.2f}s",
             "avg_retries_per_chapter": f"{avg_retries:.2f}",
-            "agent_performance": agent_stats
+            "agent_performance": agent_stats,
+            "token_usage": self.metrics.get("token_usage", {}),
+            "latency_percentiles": latency_percentiles
         }
     
     def print_summary(self):
@@ -158,13 +224,57 @@ class PerformanceMonitor:
         print("\n📈 Agent 性能统计:")
         for agent_name, stats in summary["agent_performance"].items():
             print(f"\n  {agent_name}:")
-            print(f"    调用次数: {stats['total_calls']}")
-            print(f"    总耗时: {stats['total_time']:.2f}s")
-            print(f"    平均耗时: {stats['total_time'] / stats['total_calls']:.2f}s" if stats['total_calls'] > 0 else "    平均耗时: N/A")
-            print(f"    Token 消耗: {stats['total_tokens']}")
-            print(f"    失败次数: {stats['total_failures']}")
+            print(f"    调用次数: {stats.get('calls', 0)}")
+            print(f"    总耗时: {stats.get('total_time', 0):.2f}s")
+            avg_time = stats.get('total_time', 0) / stats.get('calls', 1) if stats.get('calls', 0) > 0 else 0
+            print(f"    平均耗时: {avg_time:.2f}s")
+            print(f"    输入 Token: {stats.get('total_input_tokens', 0):,}")
+            print(f"    输出 Token: {stats.get('total_output_tokens', 0):,}")
+            print(f"    总 Token: {stats.get('total_tokens', 0):,}")
+            print(f"    成本: ${stats.get('total_cost_usd', 0):.4f}")
+            print(f"    失败次数: {stats.get('failures', 0)}")
+        
+        # 显示延迟百分位数
+        if "latency_percentiles" in summary and summary["latency_percentiles"]:
+            print("\n⏱️ 延迟统计:")
+            percentiles = summary["latency_percentiles"]
+            print(f"    P50: {percentiles.get('p50', 0):.2f}s")
+            print(f"    P95: {percentiles.get('p95', 0):.2f}s")
+            print(f"    P99: {percentiles.get('p99', 0):.2f}s")
+        
+        # 显示总成本
+        if "token_usage" in summary:
+            usage = summary["token_usage"]
+            print("\n💰 总成本统计:")
+            print(f"    总输入 Token: {usage.get('total_input_tokens', 0):,}")
+            print(f"    总输出 Token: {usage.get('total_output_tokens', 0):,}")
+            print(f"    总成本: ${usage.get('total_cost_usd', 0):.4f}")
         
         print("="*60)
+    
+    def get_cost_report(self) -> Dict[str, Any]:
+        """
+        获取成本报表
+        
+        Returns:
+            包含详细成本信息的字典
+        """
+        summary = self.get_summary()
+        
+        return {
+            "total_cost_usd": self.metrics.get("token_usage", {}).get("total_cost_usd", 0.0),
+            "total_input_tokens": self.metrics.get("token_usage", {}).get("total_input_tokens", 0),
+            "total_output_tokens": self.metrics.get("token_usage", {}).get("total_output_tokens", 0),
+            "by_agent": {
+                agent_name: {
+                    "cost_usd": stats.get("total_cost_usd", 0.0),
+                    "input_tokens": stats.get("total_input_tokens", 0),
+                    "output_tokens": stats.get("total_output_tokens", 0),
+                    "calls": stats.get("calls", 0)
+                }
+                for agent_name, stats in summary.get("agent_performance", {}).items()
+            }
+        }
 
 
 def monitor_performance(agent_name: str):

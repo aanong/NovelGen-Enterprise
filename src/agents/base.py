@@ -12,6 +12,7 @@ from ..config import Config
 from ..utils import MockChatModel
 from ..core.llm_handler import LLMResponseHandler
 from ..core.exceptions import LLMParseError
+from ..core.cache import get_cache_manager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -124,15 +125,19 @@ class BaseAgent(ABC):
         self,
         prompt: ChatPromptTemplate,
         variables: Dict[str, Any],
-        parse_json: bool = True
+        parse_json: bool = True,
+        use_cache: bool = True,
+        cache_ttl: int = 3600
     ) -> Dict[str, Any]:
         """
-        调用 LLM 并处理响应
+        调用 LLM 并处理响应（支持缓存）
         
         Args:
             prompt: 提示词模板
             variables: 模板变量
             parse_json: 是否解析 JSON
+            use_cache: 是否使用缓存，默认 True
+            cache_ttl: 缓存过期时间（秒），默认 1 小时
             
         Returns:
             处理后的响应字典
@@ -140,9 +145,45 @@ class BaseAgent(ABC):
         self._call_count += 1
         messages = prompt.format_messages(**variables)
         
+        # 构建缓存键（使用完整的 prompt 和 variables）
+        prompt_str = str(messages)
+        cache_manager = get_cache_manager()
+        
+        # 尝试从缓存获取
+        if use_cache and not self._use_mock:
+            try:
+                cached_response = await cache_manager.get_llm_response(
+                    model_name=self.model_name,
+                    prompt=prompt_str,
+                    temperature=self.temperature
+                )
+                if cached_response:
+                    logger.info(f"{self.__class__.__name__} 使用缓存响应")
+                    result = LLMResponseHandler.process_response(
+                        type('obj', (object,), {'content': cached_response})(),
+                        extract_json=parse_json
+                    )
+                    return result
+            except Exception as e:
+                logger.debug(f"缓存查询失败: {e}，继续调用 LLM")
+        
+        # 调用 LLM
         try:
             response = await self.llm.ainvoke(messages)
             result = LLMResponseHandler.process_response(response, extract_json=parse_json)
+            
+            # 保存到缓存
+            if use_cache and not self._use_mock and result.get("success"):
+                try:
+                    await cache_manager.set_llm_response(
+                        model_name=self.model_name,
+                        prompt=prompt_str,
+                        response=result.get("cleaned", result.get("raw", "")),
+                        ttl=cache_ttl,
+                        temperature=self.temperature
+                    )
+                except Exception as e:
+                    logger.debug(f"保存缓存失败: {e}")
             
             if not result["success"] and parse_json:
                 logger.warning(f"{self.__class__.__name__} 无法解析 JSON 响应")

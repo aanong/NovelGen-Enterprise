@@ -1,9 +1,13 @@
 import asyncio
 import json
+import logging
 from src.worker import celery_app
 from src.services.state_loader import load_initial_state
 from src.graph import NGEGraph
 from src.services.redis_stream import redis_stream
+from src.core.error_handler import ErrorHandler, ErrorType
+
+logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True, name="generate_chapter")
 def generate_chapter_task(self, novel_id: int, branch_id: str = "main"):
@@ -65,10 +69,25 @@ def generate_chapter_task(self, novel_id: int, branch_id: str = "main"):
             return result
 
         except Exception as e:
-            error_msg = str(e)
+            error_type, error_msg = ErrorHandler.classify_error(e)
+            friendly_msg = ErrorHandler.get_friendly_error_message(e)
+            
+            logger.error(f"任务执行失败: {error_msg}", exc_info=True)
             print(f"❌ Error in graph execution: {error_msg}")
-            await redis_stream.publish_event(task_id, "error", {"message": error_msg})
-            raise e
+            
+            # 发送错误事件
+            await redis_stream.publish_event(task_id, "error", {
+                "message": friendly_msg,
+                "error_type": error_type.value,
+                "technical_details": error_msg
+            })
+            
+            # 临时错误可以重试，永久错误直接抛出
+            if error_type == ErrorType.PERMANENT:
+                raise e
+            else:
+                # 临时错误也抛出，让 Celery 的重试机制处理
+                raise e
         finally:
             await redis_stream.close()
 

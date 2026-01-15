@@ -7,6 +7,7 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .config import Config
+from .core.cache import get_cache_manager
 
 try:
     import google.generativeai as genai  # type: ignore
@@ -20,19 +21,49 @@ if genai is not None:
         pass
 
 
-def get_embedding(text: str) -> List[float]:
+async def get_embedding(text: str, use_cache: bool = True) -> List[float]:
     """
-    使用 Gemini 模型获取文本的 Embedding 向量
+    使用 Gemini 模型获取文本的 Embedding 向量（支持缓存）
+    
+    Args:
+        text: 待编码的文本
+        use_cache: 是否使用缓存，默认 True
+        
+    Returns:
+        Embedding 向量列表
     """
+    # 尝试从缓存获取
+    if use_cache:
+        try:
+            cache_manager = get_cache_manager()
+            cached_embedding = await cache_manager.get_embedding(text)
+            if cached_embedding:
+                return cached_embedding
+        except Exception as e:
+            # 缓存失败不影响主流程
+            pass
+    
+    # 调用 API 获取 Embedding
     try:
         if genai is None:
-            return [0.1] * 768
-        result = genai.embed_content(
-            model=Config.model.EMBEDDING_MODEL,
-            content=text,
-            task_type="retrieval_document"
-        )
-        return result['embedding']
+            embedding = [0.1] * 768
+        else:
+            result = genai.embed_content(
+                model=Config.model.EMBEDDING_MODEL,
+                content=text,
+                task_type="retrieval_document"
+            )
+            embedding = result['embedding']
+        
+        # 保存到缓存
+        if use_cache:
+            try:
+                cache_manager = get_cache_manager()
+                await cache_manager.set_embedding(text, embedding)
+            except Exception:
+                pass
+        
+        return embedding
     except Exception:
         # Fallback for mock/test
         return [0.1] * 768

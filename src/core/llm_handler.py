@@ -113,18 +113,22 @@ class LLMResponseHandler:
         return cleaned
     
     @classmethod
-    def extract_json(
+    async def extract_json(
         cls, 
         text: str,
-        allow_array: bool = False
+        allow_array: bool = False,
+        llm_fix: Optional[Any] = None,
+        max_retries: int = 2
     ) -> Optional[Union[Dict[str, Any], list]]:
         """
-        从文本中提取 JSON 对象或数组
+        从文本中提取 JSON 对象或数组（支持 LLM 修复）
         支持多种格式：直接 JSON、代码块、内嵌 JSON
         
         Args:
             text: 包含 JSON 的文本
             allow_array: 是否允许返回数组
+            llm_fix: LLM 实例（用于修复 JSON，可选）
+            max_retries: 最大重试次数（使用 LLM 修复）
             
         Returns:
             解析后的 JSON 对象/数组，失败返回 None
@@ -166,6 +170,29 @@ class LLMResponseHandler:
                     return json.loads(array_match.group(1))
                 except json.JSONDecodeError:
                     pass
+        
+        # 5. 尝试使用 LLM 修复（如果提供了 LLM 实例）
+        if llm_fix and max_retries > 0:
+            try:
+                fix_prompt = f"""以下文本包含 JSON 数据，但格式可能有问题。请提取并重新格式化为有效的 JSON 对象。
+
+原始文本：
+{text}
+
+请只输出有效的 JSON 对象，不要包含任何其他文字说明。"""
+                
+                response = await llm_fix.ainvoke(fix_prompt)
+                fixed_text = cls.normalize(response.content)
+                
+                # 递归调用（减少重试次数）
+                return await cls.extract_json(
+                    fixed_text,
+                    allow_array=allow_array,
+                    llm_fix=None,  # 不再递归修复
+                    max_retries=0
+                )
+            except Exception as e:
+                logger.warning(f"LLM JSON 修复失败: {e}")
         
         return None
     
@@ -271,6 +298,18 @@ def strip_think_tags(content: str) -> str:
     return LLMResponseHandler.strip_think_tags(content)
 
 
-def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """向后兼容的 JSON 提取函数"""
-    return LLMResponseHandler.extract_json(text)
+async def extract_json_from_text(
+    text: str,
+    llm_fix: Optional[Any] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    向后兼容的 JSON 提取函数（支持异步和 LLM 修复）
+    
+    Args:
+        text: 包含 JSON 的文本
+        llm_fix: LLM 实例（用于修复，可选）
+        
+    Returns:
+        解析后的 JSON 对象
+    """
+    return await LLMResponseHandler.extract_json(text, llm_fix=llm_fix)

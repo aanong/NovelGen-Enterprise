@@ -70,8 +70,36 @@ class DatabaseConfig:
     """数据库配置"""
     
     POSTGRES_URL = os.getenv("POSTGRES_URL")
-    POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
-    MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    
+    @classmethod
+    def get_pool_size(cls) -> int:
+        """
+        获取连接池大小（根据并发任务数动态计算）
+        
+        Returns:
+            连接池大小
+        """
+        # 尝试从环境变量获取并发任务数
+        concurrent_tasks = int(os.getenv("CONCURRENT_TASKS", "5"))
+        # 根据并发任务数计算：至少 10，或并发任务数 * 2
+        calculated_size = max(10, concurrent_tasks * 2)
+        # 允许通过环境变量覆盖
+        return int(os.getenv("DB_POOL_SIZE", str(calculated_size)))
+    
+    @classmethod
+    def get_max_overflow(cls) -> int:
+        """
+        获取最大溢出连接数
+        
+        Returns:
+            最大溢出连接数
+        """
+        pool_size = cls.get_pool_size()
+        # 溢出连接数通常是池大小的 2 倍
+        return int(os.getenv("DB_MAX_OVERFLOW", str(pool_size * 2)))
+    
+    POOL_SIZE = get_pool_size()
+    MAX_OVERFLOW = get_max_overflow()
     POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))
 
 class RedisConfig:

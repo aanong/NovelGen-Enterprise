@@ -121,15 +121,36 @@ class WriterAgent(BaseAgent):
     
     def _build_character_context(self, state: NGEState) -> str:
         """
-        构建人物上下文
+        构建人物上下文（优化：限制角色数量以减少 token 使用）
         包含基础信息、语言风格、心理状态和价值观约束
+        
+        Args:
+            state: 当前状态
+            
+        Returns:
+            人物上下文字符串（最多包含 N 个主要角色）
         """
         character_lines = []
         speech_style_lines = []
         psychology_lines = []
         value_lines = []
         
-        for name, char in state.characters.items():
+        # 优化：如果角色太多，只包含前 N 个（通常是主要角色）
+        characters_to_include = list(state.characters.items())
+        if len(characters_to_include) > Defaults.MAX_CHARACTERS_IN_PROMPT:
+            # 优先包含有禁忌行为的角色（更重要的约束）
+            characters_with_forbidden = [
+                (name, char) for name, char in characters_to_include
+                if state.antigravity_context.character_anchors.get(name, [])
+            ]
+            other_characters = [
+                (name, char) for name, char in characters_to_include
+                if not state.antigravity_context.character_anchors.get(name, [])
+            ]
+            # 先包含有禁忌的角色，再补充其他角色
+            characters_to_include = (characters_with_forbidden + other_characters)[:Defaults.MAX_CHARACTERS_IN_PROMPT]
+        
+        for name, char in characters_to_include:
             # 获取禁忌行为
             forbidden = state.antigravity_context.character_anchors.get(name, [])
             forbidden_str = f"【禁止行为：{', '.join(forbidden)}】" if forbidden else ""
@@ -236,8 +257,19 @@ class WriterAgent(BaseAgent):
         return "\n【相关背景与细节设定】\n" + "\n".join(state.refined_context) + "\n"
     
     def _build_history_summary(self, state: NGEState) -> str:
-        """构建历史摘要"""
-        return '\n'.join(state.memory_context.recent_summaries)
+        """
+        构建历史摘要（优化：限制数量以减少 token 使用）
+        
+        Args:
+            state: 当前状态
+            
+        Returns:
+            历史摘要字符串（最多包含最近 3 条）
+        """
+        summaries = state.memory_context.recent_summaries
+        # 只取最近 N 条摘要，减少 token 使用
+        limited_summaries = summaries[-Defaults.MAX_CONTEXT_SUMMARIES:] if len(summaries) > Defaults.MAX_CONTEXT_SUMMARIES else summaries
+        return '\n'.join(limited_summaries)
     
     def _build_threads_string(self, state: NGEState) -> str:
         """构建伏笔字符串"""
@@ -261,7 +293,6 @@ class WriterAgent(BaseAgent):
                 "【未解决伏笔/悬念】：\n"
                 "{threads_str}\n"
                 "\n【核心执行准则】\n"
-                "- Rule 6.2: 在回复的开头必须以当前遵循：[场景准则]作为验证（如：当前遵循：Action 场景，短促动词，禁用长句）。\n"
                 "- 绝对禁止让角色做出其【禁止行为】中的动作。\n"
                 "- 绝对遵守场景强制约束，这是文风的一致性保证。\n"
                 "- 保持角色心境与当前状态一致。\n"
