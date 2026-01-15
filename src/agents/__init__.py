@@ -5,7 +5,7 @@ Agents 模块
 
 from .base import BaseAgent
 from .writer import WriterAgent
-from .architect import Architect
+from .architect import ArchitectAgent
 from .evolver import CharacterEvolver, apply_evolution_to_character
 from .reviewer import ReviewerAgent
 from .summarizer import SummarizerAgent
@@ -21,7 +21,7 @@ __all__ = [
     
     # 核心 Agent
     "WriterAgent",
-    "Architect",
+    "ArchitectAgent",
     "CharacterEvolver",
     "ReviewerAgent",
     "SummarizerAgent",

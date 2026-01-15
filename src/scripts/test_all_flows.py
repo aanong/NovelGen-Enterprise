@@ -320,7 +320,11 @@ async def test_all_flows():
             # Verify Snapshot
             # There should be a snapshot for Ch1 (main) or Ch2?
             # Snapshots are usually saved AFTER a chapter is generated.
-            snapshots = db.query(CharacterBranchStatus).filter_by(novel_id=novel.id).all()
+            # CharacterBranchStatus links via character_id, not novel_id
+            char_ids = [c.id for c in db.query(Character).filter_by(novel_id=novel.id).all()]
+            snapshots = db.query(CharacterBranchStatus).filter(
+                CharacterBranchStatus.character_id.in_(char_ids)
+            ).all() if char_ids else []
             print(f"  ✅ Found {len(snapshots)} Character Snapshots")
             
         except Exception as e:

@@ -17,7 +17,7 @@ class NovelResponse(NovelBase):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ChapterBase(BaseModel):
     title: Optional[str] = None
@@ -36,7 +36,7 @@ class ChapterResponse(ChapterBase):
     scene_tags: Optional[List[str]] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class CharacterBase(BaseModel):
     name: str
@@ -54,7 +54,7 @@ class CharacterResponse(CharacterBase):
     status: Optional[Any] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OutlineBase(BaseModel):
     chapter_number: int
@@ -70,7 +70,7 @@ class OutlineResponse(OutlineBase):
     branch_id: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class RelationshipBase(BaseModel):
     char_a_id: int
@@ -85,7 +85,7 @@ class RelationshipResponse(RelationshipBase):
     id: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class WorldItemResponse(BaseModel):
     id: int
@@ -96,7 +96,7 @@ class WorldItemResponse(BaseModel):
     location: Optional[str]
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class NovelBibleResponse(BaseModel):
     id: int
@@ -106,4 +106,4 @@ class NovelBibleResponse(BaseModel):
     importance: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True
