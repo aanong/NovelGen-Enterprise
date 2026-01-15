@@ -33,6 +33,12 @@
 - [多分支剧情](#多分支剧情)
 - [项目结构](#项目结构)
 - [Antigravity 规则系统](#antigravity-规则系统)
+- [深度功能详解](#深度功能详解)
+  - [一、文笔优化系统](#一文笔优化系统)
+  - [二、文学元素系统](#二文学元素系统)
+  - [三、价值观系统](#三价值观系统)
+  - [四、世界观一致性守护](#四世界观一致性守护)
+  - [五、角色成长系统](#五角色成长系统)
 - [故障排除](#故障排除)
 - [开发指南](#开发指南)
 - [贡献指南](#贡献指南)
@@ -54,8 +60,20 @@
 - **伏笔生命周期管理**: 结构化追踪伏笔的埋设、推进和回收
 - **人物心理深度**: 支持人物内心冲突、潜意识恐惧、防御机制等心理描写
 - **节奏控制系统**: RhythmAnalyzer 分析剧情节奏，防止连续高潮或拖沓
-- **典故注入系统**: AllusionAdvisor 主动推荐文学典故和叙事手法
+- **典故注入系统**: AllusionAdvisor 主动推荐文学典故和叙事手法，支持典故使用验证
 - **语言风格定制**: 每个角色可配置独特的说话风格和口头禅
+
+### 深度优化功能（v2.0 新增）
+
+- **写作技法指导**: WritingTechniqueAdvisor 提供场景化写作技法建议（白描、蒙太奇、意识流等）
+- **视角控制系统**: 支持第一人称、第三人称限制视角、全知视角的精确控制
+- **描写平衡管理**: 自动调节环境/动作/心理/对话描写的比例
+- **氛围渲染控制**: 针对紧张、恐怖、温馨等不同氛围提供关键词和禁忌词指导
+- **文学元素库**: 预置典故、诗词、成语、叙事母题等丰富的文学素材
+- **价值观冲突系统**: 支持角色两难抉择建模，自动检测行为违规
+- **世界观一致性守护**: WorldConsistencyGuard 检测并修正违背设定的内容
+- **角色成长曲线**: 支持线性/指数/阶梯等多种成长模式，追踪技能驾驭曲线
+- **思想成熟度系统**: 追踪角色的认知深度、情绪成熟度、决断力等思想维度
 
 ### 企业级工程能力
 
@@ -121,10 +139,10 @@
 
 1. **LoadContext**: 从数据库加载角色状态、世界观、历史摘要
 2. **Plan**: ArchitectAgent 规划本章内容，RhythmAnalyzer 分析节奏
-3. **Refine**: RAG 检索相关设定，AllusionAdvisor 推荐典故
-4. **Write**: WriterAgent 生成章节正文
-5. **Review**: ReviewerAgent 逻辑审查和 OOC 检测
-6. **Evolve**: CharacterEvolver 更新人物状态，保存章节
+3. **Refine**: RAG 检索相关设定，AllusionAdvisor 推荐典故，WritingTechniqueAdvisor 提供技法建议
+4. **Write**: WriterAgent 生成章节正文（应用视角控制、描写平衡、氛围渲染）
+5. **Review**: ReviewerAgent 逻辑审查和 OOC 检测，WorldConsistencyGuard 检查世界观一致性
+6. **Evolve**: CharacterEvolver 更新人物状态（含价值观变化、思想成长、技能进化），保存章节
 
 ---
 
@@ -681,13 +699,19 @@ curl -X POST "http://localhost:8000/api/generate/chapter" \
 NovelGen-Enterprise/
 ├── src/
 │   ├── agents/                 # AI Agent 实现
+│   │   ├── __init__.py        # 模块导出
 │   │   ├── base.py            # Agent 基类
 │   │   ├── architect.py       # 大纲规划 Agent
 │   │   ├── writer.py          # 写作 Agent
 │   │   ├── reviewer.py        # 审核 Agent
 │   │   ├── evolver.py         # 人物演化 Agent
 │   │   ├── rhythm_analyzer.py # 节奏分析 Agent
-│   │   ├── allusion_advisor.py # 典故推荐 Agent
+│   │   ├── style_analyzer.py  # 文风分析 Agent
+│   │   ├── allusion_advisor.py # 典故推荐 Agent（含验证功能）
+│   │   ├── writing_technique_advisor.py # 写作技法顾问 Agent [新增]
+│   │   ├── world_guard.py     # 世界观一致性守护 Agent [新增]
+│   │   ├── learner.py         # 学习 Agent
+│   │   ├── summarizer.py      # 摘要 Agent
 │   │   └── constants.py       # 常量定义
 │   │
 │   ├── api/                   # FastAPI 接口
@@ -698,14 +722,8 @@ NovelGen-Enterprise/
 │   │       ├── novels.py
 │   │       ├── chapters.py
 │   │       ├── characters.py
+│   │       ├── plot_branches.py # 分支管理
 │   │       └── ...
-│   │
-│   ├── core/                  # 核心模块
-│   │   ├── __init__.py
-│   │   ├── llm_handler.py    # LLM 响应处理
-│   │   ├── types.py          # 类型定义
-│   │   ├── exceptions.py     # 异常类
-│   │   └── factories.py      # 工厂类
 │   │
 │   ├── db/                    # 数据库层
 │   │   ├── base.py           # 数据库连接
@@ -714,6 +732,7 @@ NovelGen-Enterprise/
 │   │   └── *_repository.py   # 仓储类
 │   │
 │   ├── nodes/                 # LangGraph 节点
+│   │   ├── __init__.py       # 模块导出
 │   │   ├── base.py           # 节点基类
 │   │   ├── loader.py         # 上下文加载
 │   │   ├── planner.py        # 章节规划
@@ -723,8 +742,10 @@ NovelGen-Enterprise/
 │   │   └── evolver.py        # 状态演化
 │   │
 │   ├── schemas/               # 数据模型
-│   │   ├── state.py          # NGEState 全局状态
-│   │   └── style.py          # 文风模型
+│   │   ├── __init__.py       # 模块导出
+│   │   ├── state.py          # NGEState 全局状态（含价值观/成长系统）
+│   │   ├── style.py          # 文风模型（含视角/描写/氛围控制）[增强]
+│   │   └── literary.py       # 文学元素模型（典故/诗词/母题）[新增]
 │   │
 │   ├── scripts/               # 独立脚本
 │   │   ├── import_novel.py   # 导入设定
@@ -735,6 +756,7 @@ NovelGen-Enterprise/
 │   ├── services/              # 业务逻辑层
 │   │   ├── novel_service.py
 │   │   ├── chapter_service.py
+│   │   ├── plot_branch_service.py # 分支服务
 │   │   └── ...
 │   │
 │   ├── config.py              # 配置管理
@@ -751,6 +773,8 @@ NovelGen-Enterprise/
 ├── docker-compose.yml         # Docker 编排
 ├── Dockerfile                 # Docker 镜像
 ├── requirements.txt           # Python 依赖
+├── REFERENCE_LIBRARY_GUIDE.md # 资料库使用指南
+├── CHANGELOG.md               # 更新日志
 └── README.md                  # 本文档
 ```
 
@@ -783,6 +807,293 @@ class AntigravityConfig:
         "Action": {"max_sentence_length": 20},
         "Dialogue": {"min_dialogue_ratio": 0.6}
     }
+```
+
+---
+
+## 深度功能详解
+
+### 一、文笔优化系统
+
+#### 写作技法顾问 (WritingTechniqueAdvisor)
+
+根据场景类型自动推荐写作技法，提供专业的写作指导：
+
+```python
+from src.agents import WritingTechniqueAdvisor
+
+advisor = WritingTechniqueAdvisor()
+advice = await advisor.advise(state)
+
+# 返回结构化建议
+# - recommended_techniques: 推荐技法列表
+# - atmosphere_guide: 氛围渲染指导
+# - description_guides: 描写比例建议
+# - key_warnings: 关键警告
+```
+
+**内置技法库：**
+
+| 技法 | 适用场景 | 描述 |
+|------|----------|------|
+| 白描 | 动作场景、紧张时刻 | 简练笔墨，抓住特征 |
+| 蒙太奇 | 时间跳跃、回忆穿插 | 镜头组接，画面切换 |
+| 意识流 | 心理描写、情感爆发 | 意识流动，打破时空 |
+| 留白 | 悬念制造、情感含蓄 | 不说透，留想象空间 |
+| 五感描写 | 环境渲染、沉浸体验 | 视听触嗅味全方位 |
+
+#### 视角控制 (PerspectiveControl)
+
+```python
+from src.schemas import PerspectiveType, PerspectiveControl
+
+# 配置叙事视角
+perspective = PerspectiveControl(
+    primary_perspective=PerspectiveType.THIRD_LIMITED,  # 第三人称限制视角
+    pov_character="林远",  # 视角人物
+    allow_pov_switch=False,  # 禁止章节内切换
+    perspective_constraints=["不能看到视角人物背后的事物"]
+)
+```
+
+#### 场景写作模板 (SCENE_TEMPLATES)
+
+系统预置四种场景模板，自动调整写作风格：
+
+- **Action**: 短句为主、动词密集、节奏紧凑
+- **Emotional**: 心理描写深入、内心独白、意象渲染
+- **Dialogue**: 对话节奏、潜台词、非语言描写
+- **Description**: 五感描写、空间层次、时间流动
+
+---
+
+### 二、文学元素系统
+
+#### 预置文学素材库
+
+系统内置丰富的文学素材，可直接检索使用：
+
+```python
+from src.agents import AllusionAdvisor
+from src.schemas import EmotionalCategory
+
+advisor = AllusionAdvisor()
+
+# 按情感搜索典故
+allusions = advisor.search_preset_allusions(
+    emotion=EmotionalCategory.REVENGE,
+    limit=5
+)
+
+# 按意象搜索诗词
+poetry = advisor.search_preset_poetry(
+    imagery="月",
+    mood=EmotionalCategory.LONGING
+)
+
+# 获取叙事母题
+motif = advisor.get_motif_by_name("英雄之旅")
+```
+
+**预置典故示例：**
+
+| 典故 | 核心含义 | 适用情感 |
+|------|----------|----------|
+| 卧薪尝胆 | 忍辱负重，发愤图强 | 复仇、雄心 |
+| 塞翁失马 | 祸福相依 | 希望、怀旧 |
+| 精卫填海 | 意志坚定，永不放弃 | 雄心、悲凉 |
+
+#### 典故使用验证
+
+自动检验典故是否被正确使用：
+
+```python
+# 验证章节中的典故使用
+validations = await advisor.validate_allusion_usage(
+    content=chapter_content,
+    expected_allusions=["卧薪尝胆", "精卫填海"],
+    scene_context="主角遭遇重大失败后蛰伏修炼"
+)
+
+# 返回验证结果
+# - is_correct: 是否正确使用
+# - naturalness_score: 自然度评分
+# - fit_score: 契合度评分
+# - suggestions: 改进建议
+```
+
+---
+
+### 三、价值观系统
+
+#### 价值信念模型 (ValueBelief)
+
+```python
+from src.schemas import ValueBelief, ValueSystem
+
+# 定义角色的核心价值观
+justice = ValueBelief(
+    value_name="正义",
+    strength=0.9,
+    origin="童年经历",
+    can_be_shaken=True,
+    shake_conditions=["亲人被正义所伤"],
+    related_actions={
+        "must_do": "保护无辜",
+        "must_not_do": "袖手旁观",
+        "will_sacrifice": "个人利益"
+    },
+    opposing_values=["私利"]
+)
+
+# 创建完整价值观系统
+value_system = ValueSystem(
+    beliefs=[justice],
+    moral_absolutes=["不伤害无辜", "不背叛同伴"]
+)
+```
+
+#### 价值冲突建模
+
+系统自动检测两难抉择情境：
+
+```python
+# 检测价值冲突
+conflict = value_system.detect_potential_conflict(
+    situation="主角发现亲人犯下了不可饶恕的罪行"
+)
+
+# 返回冲突详情
+# - values_in_conflict: ["正义", "亲情"]
+# - intensity: 0.9
+# - possible_choices: [...]
+```
+
+#### 行为违规检查
+
+```python
+# 检查行为是否违反价值观
+violations = value_system.check_action_violation(
+    action="主角为了复仇杀害无辜平民"
+)
+# 返回: ["道德底线：不伤害无辜"]
+```
+
+---
+
+### 四、世界观一致性守护
+
+#### WorldConsistencyGuard
+
+自动检测生成内容是否违背世界观设定：
+
+```python
+from src.agents import WorldConsistencyGuard
+
+guard = WorldConsistencyGuard()
+result = await guard.check_consistency(state, chapter_content)
+
+# 返回检查结果
+# - is_consistent: 是否一致
+# - violations: 违规列表
+# - overall_score: 一致性评分
+# - needs_revision: 是否需要修订
+```
+
+**检查维度：**
+
+| 维度 | 检查内容 |
+|------|----------|
+| 能力体系 | 角色使用的能力是否超出应有水平 |
+| 地理设定 | 地点描述是否与设定一致 |
+| 时间线 | 事件顺序是否合理 |
+| 科技/魔法 | 使用的技术/魔法是否符合世界观 |
+| 社会规则 | 人物行为是否符合社会背景 |
+
+**严重程度：**
+
+- `critical`: 严重违规，必须修改
+- `major`: 较大违规，建议修改
+- `minor`: 轻微违规，可接受但最好调整
+
+---
+
+### 五、角色成长系统
+
+#### 成长曲线类型
+
+支持多种成长模式：
+
+| 类型 | 特点 | 适用角色 |
+|------|------|----------|
+| LINEAR | 线性平稳成长 | 普通角色 |
+| EXPONENTIAL | 后期爆发型 | 大器晚成型 |
+| LOGARITHMIC | 早期快速成长 | 天才型 |
+| STEP | 阶梯突破型 | 需要顿悟的角色 |
+| WAVE | 起伏波动型 | 命途多舛型 |
+
+#### 技能掌握阶段
+
+```python
+from src.schemas import MasteryStage, AbilityLevel
+
+skill = AbilityLevel(
+    level=5,
+    proficiency=0.8,
+    mastery_stage=MasteryStage.PROFICIENT,  # 熟练
+    growth_curve=GrowthCurveType.STEP,  # 阶梯成长
+    bottleneck={"type": "insight", "description": "需要实战顿悟"}
+)
+```
+
+**掌握阶段：**
+
+1. `UNAWARE` - 未知（不知道自己不会）
+2. `NOVICE` - 初学（知道自己不会）
+3. `COMPETENT` - 胜任（有意识地会）
+4. `PROFICIENT` - 熟练（无意识地会）
+5. `MASTER` - 大师（可以教授他人）
+6. `TRANSCENDENT` - 超凡（开创新境）
+
+#### 思想成熟度
+
+追踪角色的认知发展：
+
+```python
+from src.schemas import MindsetDimension
+
+mindset = MindsetDimension(
+    openness=0.6,           # 思维开放度
+    depth=0.5,              # 思维深度
+    emotional_maturity=0.4, # 情绪成熟度
+    empathy=0.7,            # 共情能力
+    decisiveness=0.5,       # 决断力
+    resilience=0.6,         # 抗压能力
+    insight=0.5,            # 领悟力
+)
+
+# 获取整体成熟度
+maturity = mindset.get_overall_maturity()  # 0.0-1.0
+```
+
+#### 成长里程碑追踪
+
+```python
+from src.schemas import CharacterGrowthSystem
+
+growth = CharacterGrowthSystem(
+    current_growth_theme="学会信任",
+    growth_blockers=["童年创伤未愈"],
+    growth_accelerators=["遇到良师益友"]
+)
+
+# 记录重大成长节点
+growth.record_milestone(
+    milestone_type="insight",
+    chapter=15,
+    description="在生死关头终于领悟剑意",
+    is_major=True
+)
 ```
 
 ---
