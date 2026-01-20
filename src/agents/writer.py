@@ -4,8 +4,10 @@ Writer Agent 模块
 """
 import re
 from typing import Optional
+import random
 from langchain_core.prompts import ChatPromptTemplate
 from ..schemas.state import NGEState
+from ..schemas.literary import PRESET_POETRY, PRESET_ALLUSIONS, PRESET_MOTIFS, EmotionalCategory
 from ..config import Config
 from ..utils import strip_think_tags, normalize_llm_content
 from .base import BaseAgent
@@ -115,18 +117,58 @@ class WriterAgent(BaseAgent):
         }
     
     def _build_style_prompt(self, state: NGEState) -> str:
-        """构建文风提示词"""
+        """构建文风提示词（增强版：注入动态文学元素）"""
         style = state.novel_bible.style_description
         if not style:
             return ""
         
-        return (
+        # 1. 基础文风
+        base_style = (
             f"文风规范：\n"
             f"- 句式：{style.rhythm_description}，{style.dialogue_narration_ratio} 的对话旁白比。\n"
             f"- 修辞偏好：{', '.join(style.common_rhetoric)}。\n"
             f"- 情绪基调：{style.emotional_tone}。\n"
             f"- 核心词汇：{', '.join(style.vocabulary_preference)}。\n"
         )
+        
+        # 2. 动态文学素材推荐
+        literary_suggestions = []
+        
+        # 简单的关键词匹配逻辑
+        tone = style.emotional_tone
+        relevant_poetry = []
+        relevant_allusions = []
+        
+        # 映射 tone 到 EmotionCategory
+        target_emotions = []
+        if "悲" in tone or "凉" in tone: target_emotions.append(EmotionalCategory.SORROW)
+        if "壮" in tone or "热血" in tone: target_emotions.append(EmotionalCategory.AMBITION)
+        if "思" in tone or "恋" in tone: target_emotions.append(EmotionalCategory.LONGING)
+        if "喜" in tone: target_emotions.append(EmotionalCategory.JOY)
+        
+        if not target_emotions:
+            target_emotions = [EmotionalCategory.HOPE, EmotionalCategory.AMBITION] # 默认
+            
+        # 筛选诗词
+        for p in PRESET_POETRY:
+            if p.mood in target_emotions:
+                relevant_poetry.append(f"『{p.quote}』(意象：{', '.join(p.imagery)})")
+        
+        # 筛选典故
+        for a in PRESET_ALLUSIONS:
+            if any(e in target_emotions for e in a.emotions):
+                relevant_allusions.append(f"『{a.title}』({a.core_meaning})")
+                
+        # 随机取样，避免 Prompt 过长
+        if relevant_poetry:
+            literary_suggestions.append(f"推荐诗意意象：{', '.join(random.sample(relevant_poetry, min(2, len(relevant_poetry))))}")
+        if relevant_allusions:
+            literary_suggestions.append(f"推荐典故暗喻：{', '.join(random.sample(relevant_allusions, min(2, len(relevant_allusions))))}")
+            
+        if literary_suggestions:
+            base_style += "\n【文学润色灵感】（请尝试自然融入以下元素）：\n" + "\n".join(literary_suggestions) + "\n"
+            
+        return base_style
     
     def _build_character_context(self, state: NGEState) -> str:
         """
@@ -143,6 +185,7 @@ class WriterAgent(BaseAgent):
         speech_style_lines = []
         psychology_lines = []
         value_lines = []
+        growth_lines = [] # 新增
         
         # 优化：如果角色太多，只包含前 N 个（通常是主要角色）
         characters_to_include = list(state.characters.items())
@@ -220,6 +263,13 @@ class WriterAgent(BaseAgent):
                     conflict = char.value_system.active_conflicts[0]
                     conflict_str = f"【{name}当前两难】：{' vs '.join(conflict.values_in_conflict)} - {conflict.situation}"
                     value_lines.append(conflict_str)
+
+            # ========== 构建成长/思想指导（新增）==========
+            if hasattr(char, 'growth_system') and char.growth_system:
+                gs = char.growth_system
+                if gs.current_growth_theme:
+                    growth_lines.append(f"【{name}本章成长焦点】：{gs.current_growth_theme}")
+                growth_lines.append(f"【{name}当前思想境界】：{gs.mindset.to_prompt_text()}")
         
         # 组合完整的人物上下文
         result_parts = ["\n".join(character_lines)]
@@ -234,10 +284,15 @@ class WriterAgent(BaseAgent):
             result_parts.append("\n\n【人物心理描写指导】（进行心理描写时参考）")
             result_parts.append("\n".join(psychology_lines))
         
-        # 添加价值观约束区块（新增）
+        # 添加价值观约束区块
         if value_lines:
             result_parts.append("\n\n【人物价值观约束】（行为决策必须考虑）")
             result_parts.append("\n".join(value_lines))
+            
+        # 添加成长指导区块
+        if growth_lines:
+            result_parts.append("\n\n【人物思想与成长】（赋予人物深度）")
+            result_parts.append("\n".join(growth_lines))
         
         return "\n".join(result_parts)
     

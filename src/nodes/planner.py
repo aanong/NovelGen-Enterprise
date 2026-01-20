@@ -70,48 +70,74 @@ class PlanNode(BaseNode):
             ).first()
             
             plan_data = {}
-            if outline:
-                # 如果已有大纲（不管是 pending 还是 completed），直接复用
-                print(f"✅ 发现现有大纲 (Ch.{current_chapter_num}, Branch: {state.current_branch}, Status: {outline.status})")
-                
-                # 如果是 pending 且内容为空，则可以调用 Agent 补充
-                if not outline.scene_description or not outline.key_conflict:
-                    plan_data = await self.architect.plan_next_chapter(state)
-                    outline.scene_description = plan_data.get("scene", outline.scene_description)
-                    outline.key_conflict = plan_data.get("conflict", outline.key_conflict)
-                    db.commit()
-                else:
-                    plan_data = {
-                        "scene": outline.scene_description,
-                        "conflict": outline.key_conflict,
-                        "instruction": f"Scene: {outline.scene_description}\nConflict: {outline.key_conflict}"
-                    }
+            coherence_feedback = ""
+            
+            if outline and outline.status == "completed":
+                 # 如果已有完成的大纲，直接复用
+                print(f"✅ 发现现有完成大纲 (Ch.{current_chapter_num})")
+                plan_data = {
+                    "scene": outline.scene_description,
+                    "conflict": outline.key_conflict,
+                    "instruction": f"Scene: {outline.scene_description}\nConflict: {outline.key_conflict}"
+                }
             else:
-                # 2. 调用 Architect Agent 生成
-                plan_data = await self.architect.plan_next_chapter(state)
+                # 2. 规划循环（带自动重试）
+                max_retries = 2
+                attempt = 0
                 
-                # 3. 存入 DB
-                new_outline = PlotOutline(
-                    novel_id=state.current_novel_id,
-                    chapter_number=current_chapter_num,
-                    branch_id=state.current_branch,
-                    scene_description=plan_data.get("scene", "Generated Scene"),
-                    key_conflict=plan_data.get("conflict", "Generated Conflict"),
-                    status="pending"
-                )
-                db.add(new_outline)
+                while attempt <= max_retries:
+                    # 如果有 outline 但不完整，或者没有 outline，都进入生成逻辑
+                    # 第一次尝试如果没有 feedback，就生成新的
+                    # 后续尝试如果有 feedback，就带上 feedback 重成
+                    
+                    if attempt > 0:
+                        print(f"🔄 规划重试 ({attempt}/{max_retries})...")
+                    
+                    plan_data = await self.architect.plan_next_chapter(state, feedback=coherence_feedback)
+                    
+                    # 连贯性检查
+                    if state.last_chapter_id or state.memory_context.recent_summaries:
+                        coherence_check = await self._check_chapter_coherence(state, plan_data)
+                        if not coherence_check.get("coherent", True):
+                            issues = coherence_check.get("issues", [])
+                            score = coherence_check.get("score", 0.0)
+                            
+                            logger.warning(f"章节连贯性检查未通过 (Score: {score}): {issues}")
+                            print(f"⚠️ 连贯性警告: {issues[0] if issues else '未知问题'}")
+                            
+                            # 如果分数太低，且还有重试机会，则重试
+                            if score < 0.6 and attempt < max_retries:
+                                coherence_feedback = "上一次规划存在严重连贯性问题，请修正：\n" + "\n".join([f"- {i}" for i in issues])
+                                attempt += 1
+                                continue
+                            else:
+                                # 虽有问题但不再重试（或者分数尚可），记录反馈给 Writer
+                                coherence_feedback = f"\n\n【连贯性警示】：\n" + "\n".join([f"- {i}" for i in issues])
+                                break
+                        else:
+                            # 检查通过
+                            coherence_feedback = ""
+                            break
+                    else:
+                        break
+                
+                # 3. 存入/更新 DB
+                if outline:
+                    outline.scene_description = plan_data.get("scene", "Generated Scene")
+                    outline.key_conflict = plan_data.get("conflict", "Generated Conflict")
+                    # 保持 pending，直到 Writer 完成
+                else:
+                    new_outline = PlotOutline(
+                        novel_id=state.current_novel_id,
+                        chapter_number=current_chapter_num,
+                        branch_id=state.current_branch,
+                        scene_description=plan_data.get("scene", "Generated Scene"),
+                        key_conflict=plan_data.get("conflict", "Generated Conflict"),
+                        status="pending"
+                    )
+                    db.add(new_outline)
                 db.commit()
 
-            # 4. 检查拟定规划的连贯性
-            coherence_feedback = ""
-            if state.last_chapter_id or state.memory_context.recent_summaries:
-                coherence_check = await self._check_chapter_coherence(state, plan_data)
-                if not coherence_check.get("coherent", True):
-                    issues = coherence_check.get("issues", [])
-                    logger.warning(f"章节连贯性检查发现问题: {issues}")
-                    coherence_feedback = f"\n\n【连贯性警示】：\n" + "\n".join([f"- {i}" for i in issues])
-                    print(f"⚠️ 连贯性提醒: {', '.join(issues[:2])}")
-            
             # 5. 节奏分析与控制（新增）
             rhythm_feedback = ""
             try:

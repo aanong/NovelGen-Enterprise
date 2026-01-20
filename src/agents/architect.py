@@ -195,10 +195,14 @@ class ArchitectAgent(BaseAgent):
         })
         return result.expanded_points
 
-    async def plan_next_chapter(self, state: NGEState) -> Dict[str, Any]:
+    async def plan_next_chapter(self, state: NGEState, feedback: str = "") -> Dict[str, Any]:
         """
         写每一章前，Agent 必须回答："这一章如何服务于主线？上一章的结尾是什么？"
         遵循 Rule 1.1: Gemini 为王，不得自行修改设定
+        
+        Args:
+            state: 全局状态
+            feedback: 上次规划的反馈意见（用于修正不连贯）
         """
         if not state.plot_progress or state.current_plot_index >= len(state.plot_progress):
             current_point_info = "剧情自由发展阶段"
@@ -218,21 +222,86 @@ class ArchitectAgent(BaseAgent):
             last_summary = "开篇第一章"
 
         characters = getattr(state, "characters", None) or {}
+        char_info_parts = []
         if characters:
-            char_info = "\n".join([
-                (
-                    f"- {name}: "
-                    f"技能={', '.join(getattr(char, 'skills', []) or [])}, "
-                    f"资产={json.dumps(getattr(char, 'assets', {}) or {}, ensure_ascii=False)}, "
-                    f"物品={', '.join([getattr(i, 'name', str(i)) for i in (getattr(char, 'inventory', []) or [])])}"
-                )
-                for name, char in characters.items()
-            ])
-        else:
-            char_info = "无"
+            for name, char in characters.items():
+                # 基础信息
+                info = [f"- {name}: {char.personality_traits.get('role', '未知角色')}"]
+                
+                # 1. 思想与成长状态
+                if hasattr(char, 'growth_system') and char.growth_system:
+                    gs = char.growth_system
+                    info.append(f"  [思想状态] {gs.mindset.to_prompt_text()}")
+                    if gs.current_growth_theme:
+                        info.append(f"  [当前成长主题] {gs.current_growth_theme}")
+                
+                # 2. 价值观与冲突
+                if hasattr(char, 'value_system') and char.value_system:
+                    vs = char.value_system
+                    # 核心价值观
+                    dominant = vs.get_dominant_value()
+                    if dominant:
+                        info.append(f"  [核心价值观] {dominant.to_prompt_text()}")
+                    # 道德底线
+                    if vs.moral_absolutes:
+                        info.append(f"  [道德底线] {', '.join(vs.moral_absolutes)}")
+                    # 活跃冲突
+                    if vs.active_conflicts:
+                        conflict = vs.active_conflicts[0]
+                        info.append(f"  [内心煎熬] {conflict.situation} ({' vs '.join(conflict.values_in_conflict)})")
 
-        active_threads = getattr(getattr(state, "memory_context", None), "global_foreshadowing", None) or []
-        threads_str = "\n".join([f"- {t}" for t in active_threads]) if active_threads else "无"
+                # 3. 心理状态
+                if hasattr(char, 'psychology') and char.psychology:
+                    psy = char.psychology
+                    if psy.current_psychological_theme:
+                        info.append(f"  [心理基调] {psy.current_psychological_theme}")
+                    if psy.subconscious_fears:
+                        info.append(f"  [潜意识恐惧] {', '.join(psy.subconscious_fears[:2])}")
+
+                # 4. 技能与状态 (保留基础)
+                skills = getattr(char, 'skills', []) or []
+                if skills:
+                    info.append(f"  [能力] {', '.join(skills[:3])}")
+                
+                char_info_parts.append("\n".join(info))
+            
+            char_info = "\n\n".join(char_info_parts)
+        else:
+            char_info = "无主要角色信息"
+
+        # 处理结构化伏笔
+        memory = getattr(state, "memory_context", None)
+        structured_foreshadowing = getattr(memory, "structured_foreshadowing", []) if memory else []
+        current_chapter_num = state.current_plot_index + 1
+        
+        urgent_threads = []
+        active_threads = []
+        
+        if structured_foreshadowing:
+            for f in structured_foreshadowing:
+                if f.status not in ["planted", "advanced"]:
+                    continue
+                    
+                # 检查是否到期
+                if f.expected_resolve_chapter:
+                    if f.expected_resolve_chapter <= current_chapter_num:
+                        urgent_threads.append(f"【必须回收】{f.content} (埋设于第{f.created_at_chapter}章, 预期第{f.expected_resolve_chapter}章回收)")
+                        continue
+                    elif f.expected_resolve_chapter <= current_chapter_num + 3:
+                        active_threads.append(f"【即将到期】{f.content} (需推进)")
+                        continue
+                
+                # 普通活跃伏笔
+                active_threads.append(f"- {f.content}")
+        
+        # 兼容旧版
+        old_threads = getattr(memory, "global_foreshadowing", []) or []
+        if not structured_foreshadowing and old_threads:
+            active_threads = [f"- {t}" for t in old_threads]
+
+        threads_str = "\n".join(urgent_threads + active_threads) if (urgent_threads or active_threads) else "无"
+
+        feedback_str = f"\n\n【必须修正的问题】\n{feedback}" if feedback else ""
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
@@ -245,6 +314,7 @@ class ArchitectAgent(BaseAgent):
                 "【人物信息】\n{char_info}\n\n"
                 "【未回收伏笔/悬念】\n{threads_str}\n\n"
                 "【当前剧情点】\n{current_point_info}\n\n"
+                "{feedback_str}\n"
                 "请规划下一章详情：如果合适，推进或回收伏笔；也可埋下与主线相关的新伏笔。"
             ))
         ])
@@ -254,6 +324,7 @@ class ArchitectAgent(BaseAgent):
             char_info=char_info,
             threads_str=threads_str,
             current_point_info=current_point_info,
+            feedback_str=feedback_str,
             format_instructions=self.plan_parser.get_format_instructions()
         )
 
