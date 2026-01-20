@@ -1,41 +1,47 @@
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload, selectinload
 from src.schemas.state import NGEState, NovelBible, CharacterState, PlotPoint, MemoryContext, WorldItemSchema
 from src.schemas.style import StyleFeatures
 from src.db.base import SessionLocal
 from src.db.models import Novel, NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle, WorldItem as DBWorldItem, Chapter as DBChapter
 
 from typing import Optional
+import json
+
 
 async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional[NGEState]:
-    """从数据库加载指定小说的初始状态"""
+    """从数据库加载指定小说的初始状态（优化版 - 使用 joinedload 消除 N+1 查询）"""
     db = SessionLocal()
     try:
-        novel = db.query(Novel).filter(Novel.id == novel_id).first()
+        # 使用 joinedload 一次性加载所有关系，大幅减少数据库查询次数
+        novel = db.query(Novel).options(
+            joinedload(Novel.bible_entries),
+            joinedload(Novel.characters).joinedload(DBCharacter.inventory),
+            joinedload(Novel.outlines).filter(DBOutline.branch_id == branch_id),
+            joinedload(Novel.world_items)
+        ).filter(Novel.id == novel_id).first()
+
         if not novel:
             print(f"❌ 错误: 在数据库中未找到 ID 为 {novel_id} 的小说。")
             return None
 
         print(f"✨ 正在为小说 '{novel.title}' (ID: {novel_id}) 加载数据...")
 
-        db_bible = db.query(DBBible).filter(DBBible.novel_id == novel_id).all()
-        db_chars = db.query(DBCharacter).filter(DBCharacter.novel_id == novel_id).all()
-        db_outlines = db.query(DBOutline).filter(
-            DBOutline.novel_id == novel_id,
-            DBOutline.branch_id == branch_id
-        ).order_by(DBOutline.chapter_number).all()
-        db_world_items = db.query(DBWorldItem).filter(DBWorldItem.novel_id == novel_id).all()
+        # 现在直接使用预加载的数据，无需再次查询
+        db_bible = novel.bible_entries
+        db_chars = novel.characters
+        db_outlines = sorted(novel.outlines, key=lambda o: o.chapter_number)
+        db_world_items = novel.world_items
 
-        # 即使数据不完整，也尝试构建基础状态
-            
         bible_content = "\n".join([f"{b.key}: {b.content}" for b in db_bible])
-        
-        characters = {
-            c.name: CharacterState(
-                name=c.name,
-                personality_traits=c.personality_traits if isinstance(c.personality_traits, dict) else {"description": str(c.personality_traits)} if c.personality_traits else {},
-                skills=c.skills or [],
-                assets=c.assets or {},
-                inventory=[
+
+        # 构建角色字典
+        characters = {}
+        for c in db_chars:
+            # 处理 inventory（已通过 joinedload 预加载）
+            inventory_items = []
+            if c.inventory:
+                inventory_items = [
                     WorldItemSchema(
                         name=item.name,
                         description=item.description or "",
@@ -43,13 +49,28 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional
                         powers=item.powers or {},
                         location=item.location
                     ) for item in c.inventory
-                ],
+                ]
+
+            # 安全解析 personality_traits
+            if isinstance(c.personality_traits, dict):
+                personality = c.personality_traits
+            elif c.personality_traits:
+                personality = {"description": str(c.personality_traits)}
+            else:
+                personality = {}
+
+            characters[c.name] = CharacterState(
+                name=c.name,
+                personality_traits=personality,
+                skills=c.skills or [],
+                assets=c.assets or {},
+                inventory=inventory_items,
                 relationships={},
                 evolution_log=c.evolution_log or ["初始导入"],
                 current_mood=c.current_mood or "平静"
-            ) for c in db_chars
-        }
-        
+            )
+
+        # 构建剧情进度
         plot_progress = [
             PlotPoint(
                 id=str(o.id),
@@ -59,19 +80,17 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional
                 is_completed=(o.status == "completed")
             ) for o in db_outlines
         ]
-        
-        # --- 章节顺序逻辑修正 ---
-        # 查找最新的已生成章节号，而不是依赖大纲状态
+
+        # 查找最新的已生成章节号
         last_chapter = db.query(func.max(DBChapter.chapter_number)).filter(
             DBChapter.novel_id == novel_id,
             DBChapter.branch_id == branch_id
         ).scalar()
 
-        # 如果没有已生成的章节，从 0 开始；否则，从下一章开始
         current_plot_index = (last_chapter or 0)
-
         print(f"🧠 状态加载器：找到上一章为 {last_chapter}，将从索引 {current_plot_index} 开始生成。")
 
+        # 构建物品列表
         world_items = [
             WorldItemSchema(
                 name=item.name,
@@ -81,31 +100,27 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional
                 location=item.location
             ) for item in db_world_items
         ]
-        
-        # 简化风格加载，实际应用中可以更复杂
-        style_refs = db.query(DBStyle).filter(DBStyle.novel_id == novel_id).limit(5).all()
-        example_sentences = [s.content for s in style_refs] # 注意：models.py 中是 content 不是 source_text
 
-        # Load global foreshadowing from persistent storage (NovelBible)
+        # 加载风格参考
+        style_refs = db.query(DBStyle).filter(DBStyle.novel_id == novel_id).limit(5).all()
+        example_sentences = [s.content for s in style_refs]
+
+        # 加载全局伏笔
         sys_bible = db.query(DBBible).filter(
             DBBible.novel_id == novel_id,
             DBBible.category == "system_state",
             DBBible.key == "global_foreshadowing"
         ).first()
-        
+
         saved_foreshadowing = []
         if sys_bible:
-            import json
             try:
-                # Content stored as JSON string inside Text column
                 saved_foreshadowing = json.loads(sys_bible.content)
             except:
                 saved_foreshadowing = []
 
         combined_summary = ["故事开篇"]
-        # Rule 3.1: Load recent summaries explicitly if not relying only on graph node
-        # (Though graph.load_context_node does this, loading it here helps initial state validity)
-        
+
         initial_state = NGEState(
             novel_bible=NovelBible(
                 world_view=bible_content,
@@ -135,6 +150,8 @@ async def load_initial_state(novel_id: int, branch_id: str = "main") -> Optional
 
     except Exception as e:
         print(f"⚠️ 从数据库加载数据时发生严重错误: {e}")
+        import traceback
+        traceback.print_exc()
         return None
     finally:
         db.close()

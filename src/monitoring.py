@@ -2,6 +2,7 @@
 性能监控与分析工具
 用于追踪 Agent 执行时间、Token 消耗等指标
 """
+import logging
 import time
 import functools
 from typing import Dict, Any, Callable, List, Optional
@@ -9,6 +10,10 @@ from datetime import datetime
 import json
 from pathlib import Path
 import statistics
+import asyncio
+from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 
 class PerformanceMonitor:
@@ -16,19 +21,19 @@ class PerformanceMonitor:
     性能监控器
     追踪 Agent 执行时间、Token 消耗、成本等指标
     """
-    
+
     # 模型价格配置（每 1M tokens，单位：美元）
     MODEL_PRICING = {
         "gemini": {
-            "input": 0.50,   # $0.50 per 1M input tokens
-            "output": 1.50   # $1.50 per 1M output tokens
+            "input": 0.50,
+            "output": 1.50
         },
         "deepseek": {
-            "input": 0.14,   # $0.14 per 1M input tokens
-            "output": 0.28  # $0.28 per 1M output tokens
+            "input": 0.14,
+            "output": 0.28
         }
     }
-    
+
     def __init__(self, log_file: str = ".performance_log.json"):
         self.log_file = Path(log_file)
         self.metrics: Dict[str, Any] = {
@@ -38,10 +43,16 @@ class PerformanceMonitor:
                 "total_output_tokens": 0,
                 "total_cost_usd": 0.0
             },
-            "latency_stats": []  # 存储所有延迟数据用于计算百分位数
+            "latency_stats": [],
+            "error_stats": {},
+            "cache_stats": {
+                "hits": 0,
+                "misses": 0
+            }
         }
+        self._session_start_times: Dict[int, float] = {}
         self._load_metrics()
-    
+
     def _load_metrics(self):
         """加载历史指标"""
         if self.log_file.exists():
@@ -50,7 +61,7 @@ class PerformanceMonitor:
                     self.metrics = json.load(f)
             except Exception as e:
                 print(f"⚠️ 无法加载性能日志: {e}")
-    
+
     def _save_metrics(self):
         """保存指标到文件"""
         try:
@@ -58,8 +69,8 @@ class PerformanceMonitor:
                 json.dump(self.metrics, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"⚠️ 无法保存性能日志: {e}")
-    
-    def start_session(self, chapter_number: int):
+
+    def start_session(self, chapter_number: int) -> int:
         """开始新的会话"""
         session = {
             "chapter": chapter_number,
@@ -67,11 +78,14 @@ class PerformanceMonitor:
             "agents": {},
             "total_time": 0,
             "retry_count": 0,
-            "success": False
+            "success": False,
+            "node_timings": {}
         }
         self.metrics["sessions"].append(session)
-        return len(self.metrics["sessions"]) - 1
-    
+        session_id = len(self.metrics["sessions"]) - 1
+        self._session_start_times[session_id] = time.perf_counter()
+        return session_id
+
     def log_agent_call(
         self,
         session_id: int,
@@ -80,25 +94,15 @@ class PerformanceMonitor:
         input_tokens: int = 0,
         output_tokens: int = 0,
         model_name: str = "gemini",
-        success: bool = True
+        success: bool = True,
+        error_type: Optional[str] = None
     ):
-        """
-        记录 Agent 调用（增强版：支持输入/输出 token 分别记录）
-        
-        Args:
-            session_id: 会话 ID
-            agent_name: Agent 名称
-            duration: 执行时间（秒）
-            input_tokens: 输入 token 数量
-            output_tokens: 输出 token 数量
-            model_name: 模型名称（用于成本计算）
-            success: 是否成功
-        """
+        """记录 Agent 调用"""
         if session_id >= len(self.metrics["sessions"]):
             return
-        
+
         session = self.metrics["sessions"][session_id]
-        
+
         if agent_name not in session["agents"]:
             session["agents"][agent_name] = {
                 "calls": 0,
@@ -108,9 +112,10 @@ class PerformanceMonitor:
                 "total_tokens": 0,
                 "total_cost_usd": 0.0,
                 "failures": 0,
-                "latencies": []  # 存储延迟数据
+                "latencies": [],
+                "error_types": {}
             }
-        
+
         agent_stats = session["agents"][agent_name]
         agent_stats["calls"] += 1
         agent_stats["total_time"] += duration
@@ -118,52 +123,99 @@ class PerformanceMonitor:
         agent_stats["total_output_tokens"] += output_tokens
         agent_stats["total_tokens"] += input_tokens + output_tokens
         agent_stats["latencies"].append(duration)
-        
+
         # 计算成本
         pricing = self.MODEL_PRICING.get(model_name, self.MODEL_PRICING["gemini"])
         cost = (input_tokens / 1_000_000 * pricing["input"]) + (output_tokens / 1_000_000 * pricing["output"])
         agent_stats["total_cost_usd"] += cost
-        
+
         # 更新全局统计
         self.metrics["token_usage"]["total_input_tokens"] += input_tokens
         self.metrics["token_usage"]["total_output_tokens"] += output_tokens
         self.metrics["token_usage"]["total_cost_usd"] += cost
         self.metrics["latency_stats"].append(duration)
-        
+
         if not success:
             agent_stats["failures"] += 1
-    
+            if error_type:
+                if error_type not in agent_stats["error_types"]:
+                    agent_stats["error_types"][error_type] = 0
+                agent_stats["error_types"][error_type] += 1
+
+                # 更新全局错误统计
+                if error_type not in self.metrics["error_stats"]:
+                    self.metrics["error_stats"][error_type] = 0
+                self.metrics["error_stats"][error_type] += 1
+
+    def log_node_timing(
+        self,
+        session_id: int,
+        node_name: str,
+        duration: float
+    ):
+        """记录节点执行时间"""
+        if session_id >= len(self.metrics["sessions"]):
+            return
+
+        session = self.metrics["sessions"][session_id]
+        if "node_timings" not in session:
+            session["node_timings"] = {}
+
+        if node_name not in session["node_timings"]:
+            session["node_timings"][node_name] = []
+        session["node_timings"][node_name].append(duration)
+
     def end_session(self, session_id: int, success: bool = True, retry_count: int = 0):
         """结束会话"""
         if session_id >= len(self.metrics["sessions"]):
             return
-        
+
         session = self.metrics["sessions"][session_id]
         session["end_time"] = datetime.utcnow().isoformat()
         session["success"] = success
         session["retry_count"] = retry_count
-        
+
         # 计算总时间
-        start = datetime.fromisoformat(session["start_time"])
-        end = datetime.fromisoformat(session["end_time"])
-        session["total_time"] = (end - start).total_seconds()
-        
+        if session_id in self._session_start_times:
+            total_time = time.perf_counter() - self._session_start_times[session_id]
+            session["total_time"] = total_time
+            del self._session_start_times[session_id]
+        else:
+            session["total_time"] = 0
+
         self._save_metrics()
-    
+
+    def record_cache_hit(self):
+        """记录缓存命中"""
+        self.metrics["cache_stats"]["hits"] += 1
+
+    def record_cache_miss(self):
+        """记录缓存未命中"""
+        self.metrics["cache_stats"]["misses"] += 1
+
+    def get_cache_hit_rate(self) -> float:
+        """获取缓存命中率"""
+        hits = self.metrics["cache_stats"]["hits"]
+        misses = self.metrics["cache_stats"]["misses"]
+        total = hits + misses
+        if total == 0:
+            return 0.0
+        return hits / total
+
     def get_summary(self) -> Dict[str, Any]:
         """获取性能摘要"""
         if not self.metrics["sessions"]:
             return {"message": "暂无数据"}
-        
+
         total_sessions = len(self.metrics["sessions"])
         successful_sessions = sum(1 for s in self.metrics["sessions"] if s.get("success"))
-        
+
         total_time = sum(s.get("total_time", 0) for s in self.metrics["sessions"])
         avg_time = total_time / total_sessions if total_sessions > 0 else 0
-        
+
         total_retries = sum(s.get("retry_count", 0) for s in self.metrics["sessions"])
         avg_retries = total_retries / total_sessions if total_sessions > 0 else 0
-        
+
         # Agent 统计
         agent_stats = {}
         for session in self.metrics["sessions"]:
@@ -173,14 +225,16 @@ class PerformanceMonitor:
                         "total_calls": 0,
                         "total_time": 0,
                         "total_tokens": 0,
-                        "total_failures": 0
+                        "total_failures": 0,
+                        "total_cost_usd": 0.0
                     }
-                
+
                 agent_stats[agent_name]["total_calls"] += stats.get("calls", 0)
                 agent_stats[agent_name]["total_time"] += stats.get("total_time", 0)
                 agent_stats[agent_name]["total_tokens"] += stats.get("total_tokens", 0)
                 agent_stats[agent_name]["total_failures"] += stats.get("failures", 0)
-        
+                agent_stats[agent_name]["total_cost_usd"] += stats.get("total_cost_usd", 0.0)
+
         # 计算延迟百分位数
         latencies = self.metrics.get("latency_stats", [])
         latency_percentiles = {}
@@ -189,9 +243,28 @@ class PerformanceMonitor:
             latency_percentiles = {
                 "p50": sorted_latencies[int(len(sorted_latencies) * 0.5)],
                 "p95": sorted_latencies[int(len(sorted_latencies) * 0.95)],
-                "p99": sorted_latencies[int(len(sorted_latencies) * 0.99)]
+                "p99": sorted_latencies[int(len(sorted_latencies) * 0.99)],
+                "avg": sum(sorted_latencies) / len(sorted_latencies)
             }
-        
+
+        # 节点执行时间统计
+        node_timings = {}
+        for session in self.metrics["sessions"]:
+            for node_name, timings in session.get("node_timings", {}).items():
+                if node_name not in node_timings:
+                    node_timings[node_name] = []
+                node_timings[node_name].extend(timings)
+
+        node_stats = {}
+        for node_name, timings in node_timings.items():
+            node_stats[node_name] = {
+                "count": len(timings),
+                "total_time": sum(timings),
+                "avg_time": sum(timings) / len(timings) if timings else 0,
+                "min_time": min(timings) if timings else 0,
+                "max_time": max(timings) if timings else 0
+            }
+
         return {
             "total_chapters": total_sessions,
             "successful_chapters": successful_sessions,
@@ -200,27 +273,31 @@ class PerformanceMonitor:
             "avg_retries_per_chapter": f"{avg_retries:.2f}",
             "agent_performance": agent_stats,
             "token_usage": self.metrics.get("token_usage", {}),
-            "latency_percentiles": latency_percentiles
+            "latency_percentiles": latency_percentiles,
+            "node_performance": node_stats,
+            "cache_stats": self.metrics.get("cache_stats", {}),
+            "cache_hit_rate": f"{self.get_cache_hit_rate() * 100:.1f}%",
+            "error_stats": self.metrics.get("error_stats", {})
         }
-    
+
     def print_summary(self):
         """打印性能摘要"""
         summary = self.get_summary()
-        
-        print("\n" + "="*60)
+
+        print("\n" + "=" * 60)
         print("📊 NovelGen-Enterprise 性能报告")
-        print("="*60)
-        
+        print("=" * 60)
+
         if "message" in summary:
             print(summary["message"])
             return
-        
+
         print(f"总章节数: {summary['total_chapters']}")
         print(f"成功章节数: {summary['successful_chapters']}")
         print(f"成功率: {summary['success_rate']}")
         print(f"平均生成时间: {summary['avg_time_per_chapter']}")
         print(f"平均重试次数: {summary['avg_retries_per_chapter']}")
-        
+
         print("\n📈 Agent 性能统计:")
         for agent_name, stats in summary["agent_performance"].items():
             print(f"\n  {agent_name}:")
@@ -233,15 +310,39 @@ class PerformanceMonitor:
             print(f"    总 Token: {stats.get('total_tokens', 0):,}")
             print(f"    成本: ${stats.get('total_cost_usd', 0):.4f}")
             print(f"    失败次数: {stats.get('failures', 0)}")
-        
+
+        # 显示节点性能
+        if "node_performance" in summary and summary["node_performance"]:
+            print("\n🔧 节点执行时间统计:")
+            for node_name, stats in summary["node_performance"].items():
+                print(f"  {node_name}:")
+                print(f"    调用次数: {stats['count']}")
+                print(f"    平均耗时: {stats['avg_time']:.2f}s")
+                print(f"    总耗时: {stats['total_time']:.2f}s")
+
         # 显示延迟百分位数
         if "latency_percentiles" in summary and summary["latency_percentiles"]:
             print("\n⏱️ 延迟统计:")
             percentiles = summary["latency_percentiles"]
+            print(f"    平均: {percentiles.get('avg', 0):.2f}s")
             print(f"    P50: {percentiles.get('p50', 0):.2f}s")
             print(f"    P95: {percentiles.get('p95', 0):.2f}s")
             print(f"    P99: {percentiles.get('p99', 0):.2f}s")
-        
+
+        # 显示缓存统计
+        if "cache_stats" in summary:
+            cache = summary["cache_stats"]
+            print("\n💾 缓存统计:")
+            print(f"    命中: {cache.get('hits', 0)}")
+            print(f"    未命中: {cache.get('misses', 0)}")
+            print(f"    命中率: {summary.get('cache_hit_rate', 'N/A')}")
+
+        # 显示错误统计
+        if "error_stats" in summary and summary["error_stats"]:
+            print("\n❌ 错误统计:")
+            for error_type, count in summary["error_stats"].items():
+                print(f"    {error_type}: {count}")
+
         # 显示总成本
         if "token_usage" in summary:
             usage = summary["token_usage"]
@@ -249,18 +350,13 @@ class PerformanceMonitor:
             print(f"    总输入 Token: {usage.get('total_input_tokens', 0):,}")
             print(f"    总输出 Token: {usage.get('total_output_tokens', 0):,}")
             print(f"    总成本: ${usage.get('total_cost_usd', 0):.4f}")
-        
-        print("="*60)
-    
+
+        print("=" * 60)
+
     def get_cost_report(self) -> Dict[str, Any]:
-        """
-        获取成本报表
-        
-        Returns:
-            包含详细成本信息的字典
-        """
+        """获取成本报表"""
         summary = self.get_summary()
-        
+
         return {
             "total_cost_usd": self.metrics.get("token_usage", {}).get("total_cost_usd", 0.0),
             "total_input_tokens": self.metrics.get("token_usage", {}).get("total_input_tokens", 0),
@@ -277,29 +373,110 @@ class PerformanceMonitor:
         }
 
 
+class MetricsCollector:
+    """
+    实时指标收集器
+    用于在运行时收集和聚合指标
+    """
+
+    def __init__(self, window_size: int = 100):
+        """
+        初始化指标收集器
+
+        Args:
+            window_size: 滑动窗口大小
+        """
+        self._window_size = window_size
+        self._latencies: List[float] = []
+        self._token_counts: List[int] = []
+        self._errors: List[str] = []
+        self._lock = asyncio.Lock()
+
+    async def record_latency(self, latency: float):
+        """记录延迟"""
+        async with self._lock:
+            self._latencies.append(latency)
+            if len(self._latencies) > self._window_size:
+                self._latencies.pop(0)
+
+    async def record_tokens(self, count: int):
+        """记录 token 数量"""
+        async with self._lock:
+            self._token_counts.append(count)
+            if len(self._token_counts) > self._window_size:
+                self._token_counts.pop(0)
+
+    async def record_error(self, error_type: str):
+        """记录错误"""
+        async with self._lock:
+            self._errors.append(error_type)
+            if len(self._errors) > self._window_size:
+                self._errors.pop(0)
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """获取统计信息"""
+        async with self._lock:
+            latencies = self._latencies.copy()
+            token_counts = self._token_counts.copy()
+            errors = self._errors.copy()
+
+        return {
+            "latency": {
+                "count": len(latencies),
+                "avg": statistics.mean(latencies) if latencies else 0,
+                "min": min(latencies) if latencies else 0,
+                "max": max(latencies) if latencies else 0,
+                "p95": sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0
+            },
+            "tokens": {
+                "count": len(token_counts),
+                "total": sum(token_counts),
+                "avg": statistics.mean(token_counts) if token_counts else 0
+            },
+            "errors": {
+                "count": len(errors),
+                "by_type": {e: errors.count(e) for e in set(errors)}
+            }
+        }
+
+
+# 全局监控实例
+monitor = PerformanceMonitor()
+
+# 全局指标收集器
+metrics_collector = MetricsCollector()
+
+
 def monitor_performance(agent_name: str):
     """装饰器：监控函数执行性能"""
     def decorator(func: Callable):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
-            start_time = time.time()
+            start_time = time.perf_counter()
             success = True
-            
+            error_type = None
+
             try:
                 result = await func(*args, **kwargs)
                 return result
             except Exception as e:
                 success = False
+                from .core.error_handler import ErrorHandler
+                error_type, _ = ErrorHandler.classify_error(e)
                 raise e
             finally:
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 print(f"⏱️ {agent_name} 执行耗时: {duration:.2f}s")
-        
+
+                # 记录到全局监控
+                monitor.record_cache_miss()  # 默认记录为未命中
+                await metrics_collector.record_latency(duration)
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
-            start_time = time.time()
+            start_time = time.perf_counter()
             success = True
-            
+
             try:
                 result = func(*args, **kwargs)
                 return result
@@ -307,21 +484,29 @@ def monitor_performance(agent_name: str):
                 success = False
                 raise e
             finally:
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 print(f"⏱️ {agent_name} 执行耗时: {duration:.2f}s")
-        
+
         # 判断是否为异步函数
         import asyncio
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
-    
+
     return decorator
 
 
-# 全局监控实例
-monitor = PerformanceMonitor()
+@asynccontextmanager
+async def track_time(operation_name: str):
+    """上下文管理器：追踪操作时间"""
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        duration = time.perf_counter() - start
+        await metrics_collector.record_latency(duration)
+        print(f"⏱️ {operation_name} 耗时: {duration:.2f}s")
 
 
 if __name__ == "__main__":
