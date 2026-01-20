@@ -3,7 +3,7 @@ import asyncio
 import re
 from typing import Dict, Any, List, Optional
 from ..schemas.state import NGEState
-from ..agents.constants import NodeAction
+from ..core.types import NodeAction
 from ..db.vector_store import VectorStore
 from ..db.models import NovelBible, StyleRef, ReferenceMaterial
 from ..agents.allusion_advisor import AllusionAdvisor

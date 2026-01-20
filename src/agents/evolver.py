@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ============ CharacterEvolver Agent ============
 
 from .base import BaseAgent
-from .constants import PromptTemplates
+from ..config.prompts import PromptTemplates
 from ..core.registry import register_agent
 from langchain_core.prompts import ChatPromptTemplate
 

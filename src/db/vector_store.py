@@ -218,7 +218,7 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """本地余弦相似度计算（优化版）"""
         try:
-            from ..agents.constants import Defaults
+            from ..config.defaults import Defaults
 
             q = self._db.query(model_class)
             if db_filters:

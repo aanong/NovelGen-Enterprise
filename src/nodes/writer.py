@@ -1,6 +1,6 @@
 from typing import Dict, Any
 from ..schemas.state import NGEState
-from ..agents.constants import NodeAction
+from ..core.types import NodeAction
 from ..db.base import SessionLocal
 from ..agents.writer import WriterAgent
 from .base import BaseNode

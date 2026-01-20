@@ -10,7 +10,8 @@ from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from ..db.vector_store import VectorStore
 from .base import BaseAgent
-from .constants import NodeAction, PromptTemplates
+from ..core.types import NodeAction
+from ..config.prompts import PromptTemplates
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from ..db import models
@@ -89,11 +90,11 @@ class ArchitectAgent(BaseAgent):
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个网文总策划。任务是将一个简短的故事梗概拆解为详细的分章大纲。\n"
-                "【要求】\n"
-                "1. 总共生成约 {total_chapters} 章。\n"
-                "2. 每一章都要有明确的冲突和推进。\n"
-                "3. 严格遵守世界观设定：{world_view}\n"
-                "4. 确保剧情节奏张弛有度（起承转合）。\n"
+                "【核心要求】\n"
+                "1. **强因果链**：每一章的结尾必须是下一章的直接起因。严禁出现无铺垫的场景跳跃。\n"
+                "2. **冲突升级**：冲突必须随着章节推进而螺旋上升，而非平面重复。\n"
+                "3. **人物驱动**：剧情的发展必须由人物的主动选择推动，而非机械的事件堆砌。\n"
+                "4. 严禁逻辑漏洞，严格遵守世界观设定：{world_view}\n"
                 "{ref_context}\n"
                 "输出格式必须为 JSON。\n"
                 "{format_instructions}"
@@ -306,6 +307,10 @@ class ArchitectAgent(BaseAgent):
         prompt = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个剧情规划专家。任务是为即将撰写的章节制定详细的微型提纲。\n"
+                "【逻辑连贯性原则】\n"
+                "- 必须严格承接上一章的结尾，除非明确使用了“时间跳跃”技巧。\n"
+                "- 检查人物动机：角色在这一章的行为必须符合其当前的心理状态和价值观。\n"
+                "- 避免机械推进：剧情必须通过角色的行动自然触发。\n"
                 "必须输出 JSON 格式，包含 thinking, scene_description, key_conflict, instruction。\n"
                 "{format_instructions}"
             )),
@@ -315,7 +320,7 @@ class ArchitectAgent(BaseAgent):
                 "【未回收伏笔/悬念】\n{threads_str}\n\n"
                 "【当前剧情点】\n{current_point_info}\n\n"
                 "{feedback_str}\n"
-                "请规划下一章详情：如果合适，推进或回收伏笔；也可埋下与主线相关的新伏笔。"
+                "请先推演上一章结尾到本章开头的逻辑，然后规划正文内容。"
             ))
         ])
 

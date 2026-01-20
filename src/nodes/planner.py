@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, Optional
 from ..schemas.state import NGEState
-from ..agents.constants import NodeAction
+from ..core.types import NodeAction
 from ..db.base import SessionLocal
 from ..db.models import PlotOutline
 from ..agents.architect import ArchitectAgent

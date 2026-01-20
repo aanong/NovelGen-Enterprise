@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List
 from ..schemas.state import NGEState, AbilityLevel
-from ..agents.constants import OutlineStatus
+from ..core.types import OutlineStatus
 from ..agents.evolver import (
     CharacterEvolver, EvolutionResult, CharacterEvolution,
     apply_personality_change, apply_value_change, apply_ability_change

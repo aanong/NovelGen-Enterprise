@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 from datetime import datetime
 from ..schemas.state import NGEState
-from ..agents.constants import NodeAction, ReviewDecision
+from ..core.types import NodeAction, ReviewDecision
 from ..db.base import SessionLocal
 from ..db.models import LogicAudit, PlotOutline
 from ..agents.reviewer import ReviewerAgent
@@ -73,7 +73,7 @@ class ReviewNode(BaseNode):
                     }
                 else:
                     # 风格问题或其他：REVISE（最多 N 次）
-                    from ..agents.constants import Defaults
+                    from ..config.defaults import Defaults
                     max_style_retries = Defaults.MAX_STYLE_RETRIES
                     if state.retry_count >= max_style_retries:
                         # 超过风格重试次数，转为 REPAIR

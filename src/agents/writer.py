@@ -2,18 +2,18 @@
 Writer Agent 模块
 负责正文撰写与文风模仿
 """
-import re
 from typing import Optional
 import random
 from langchain_core.prompts import ChatPromptTemplate
 from ..schemas.state import NGEState
 from ..schemas.literary import PRESET_POETRY, PRESET_ALLUSIONS, PRESET_MOTIFS, EmotionalCategory
+from ..core.types import SceneType
+from ..config.defaults import Defaults
+from ..config.prompts import PromptTemplates
+from ..config.messages import ErrorMessages
 from ..config import Config
 from ..utils import strip_think_tags, normalize_llm_content
 from .base import BaseAgent
-from .constants import SceneType, Defaults, PromptTemplates, ErrorMessages
-from ..config import Config
-from ..utils import strip_think_tags, normalize_llm_content
 from ..core.registry import register_agent
 import json
 import logging
@@ -82,7 +82,7 @@ class WriterAgent(BaseAgent):
         context_str = self._build_context_string(state)
         
         # 构建并发送提示词
-        prompt = self._create_writing_prompt()
+        prompt = self._create_writing_prompt(deep_pov=True)
         messages = prompt.format_messages(
             style_prompt=style_prompt,
             character_context=character_context,
@@ -342,9 +342,19 @@ class WriterAgent(BaseAgent):
             return "无"
         return "\n".join([f"- {t}" for t in active_threads])
     
-    def _create_writing_prompt(self) -> ChatPromptTemplate:
+    def _create_writing_prompt(self, deep_pov: bool = False) -> ChatPromptTemplate:
         """创建写作提示词模板"""
-        return ChatPromptTemplate.from_messages([
+        
+        deep_pov_instruction = ""
+        if deep_pov:
+            deep_pov_instruction = (
+                "\n【Deep POV (深层视点) 写作要求】\n"
+                "- 必须透过视点人物的感官和心境来描写世界。\n"
+                "- 环境描写不是客观的，而是主观的（例如：心情低落时，阳光也是刺眼的）。\n"
+                "- 避免“他感到”、“他想”等直接心理动词，直接展示思维流动的过程。\n"
+            )
+
+        prompt_template = ChatPromptTemplate.from_messages([
             ("system", (
                 "你是一个极具天赋的长篇小说作家。擅长细腻的描写和深刻的人物塑造。\n"
                 "{style_prompt}\n"
@@ -361,6 +371,7 @@ class WriterAgent(BaseAgent):
                 "- 绝对遵守场景强制约束，这是文风的一致性保证。\n"
                 "- 保持角色心境与当前状态一致。\n"
                 "- 此前埋下的伏笔若有机会，请自然地推进或回收。\n"
+                "{deep_pov_instruction}"
             )),
             ("human", (
                 "当前剧情：{current_point_title}\n"
@@ -369,6 +380,8 @@ class WriterAgent(BaseAgent):
                 "请开始撰写正文。字数建议在 {target_length} 字以上（最少 {min_length} 字），确保情节饱满，文风统一。"
             ))
         ])
+        
+        return prompt_template.partial(deep_pov_instruction=deep_pov_instruction)
     
     def _process_llm_response(self, response) -> str:
         """处理 LLM 响应"""

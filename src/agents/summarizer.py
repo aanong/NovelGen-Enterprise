@@ -5,7 +5,7 @@ from ..schemas.state import NGEState
 from ..config import Config
 from ..utils import strip_think_tags, normalize_llm_content, extract_json_from_text
 from .base import BaseAgent
-from .constants import PromptTemplates
+from ..config.prompts import PromptTemplates
 from ..core.registry import register_agent
 
 @register_agent("summarizer")
