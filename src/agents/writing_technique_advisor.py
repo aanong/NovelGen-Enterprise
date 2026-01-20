@@ -17,46 +17,9 @@ from ..schemas.style import (
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from .base import BaseAgent
+from ..core.registry import register_agent
 
-
-class TechniqueRecommendation(BaseModel):
-    """写作技法推荐"""
-    technique_name: str = Field(description="技法名称")
-    priority: int = Field(ge=1, le=5, description="优先级 1-5，5最高")
-    reason: str = Field(description="推荐理由")
-    application_guide: str = Field(description="具体应用指导")
-    example: str = Field(description="示例片段")
-
-
-class AtmosphereGuide(BaseModel):
-    """氛围渲染指导"""
-    atmosphere_type: str = Field(description="氛围类型")
-    keywords: List[str] = Field(description="渲染关键词")
-    forbidden_words: List[str] = Field(description="破坏氛围的词汇")
-    sensory_focus: List[str] = Field(description="强调的感官")
-    color_hints: List[str] = Field(description="色调提示")
-    rhythm_guide: str = Field(description="节奏指导")
-
-
-class DescriptionGuide(BaseModel):
-    """描写指导"""
-    description_type: str = Field(description="描写类型")
-    proportion: float = Field(ge=0.0, le=1.0, description="建议占比")
-    key_points: List[str] = Field(description="描写要点")
-    avoid_patterns: List[str] = Field(description="避免的模式")
-
-
-class WritingAdvice(BaseModel):
-    """完整的写作建议"""
-    scene_analysis: str = Field(description="场景分析")
-    recommended_techniques: List[TechniqueRecommendation] = Field(description="推荐技法")
-    atmosphere_guide: AtmosphereGuide = Field(description="氛围指导")
-    description_guides: List[DescriptionGuide] = Field(description="描写指导")
-    perspective_advice: str = Field(description="视角建议")
-    pacing_advice: str = Field(description="节奏建议")
-    key_warnings: List[str] = Field(default_factory=list, description="关键警告")
-
-
+@register_agent("writing_technique_advisor")
 class WritingTechniqueAdvisor(BaseAgent):
     """
     写作技法顾问 Agent

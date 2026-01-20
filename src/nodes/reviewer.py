@@ -8,8 +8,10 @@ from ..agents.reviewer import ReviewerAgent
 from ..utils import normalize_llm_content, strip_think_tags
 from ..config import Config
 from .base import BaseNode
+from ..core.registry import register_node
 import re
 
+@register_node("review")
 class ReviewNode(BaseNode):
     def __init__(self, reviewer: ReviewerAgent):
         self.reviewer = reviewer
@@ -86,7 +88,13 @@ class ReviewNode(BaseNode):
                             "review_feedback": f"修正建议：{feedback}",
                             "retry_count": state.retry_count + 1
                         }
-    
+        except Exception as e:
+            print(f"ReviewNode Error: {e}")
+            db.rollback()
+            return {"next_action": NodeAction.REPAIR, "review_feedback": f"Review failed: {str(e)}", "retry_count": state.retry_count + 1}
+        finally:
+            db.close()
+
     def _classify_error(self, review_result: Dict[str, Any]) -> str:
         """
         分类错误类型
@@ -116,9 +124,8 @@ class ReviewNode(BaseNode):
             return "style_error"
         
         return "other"
-        finally:
-            db.close()
 
+@register_node("repair")
 class RepairNode(BaseNode):
     def __init__(self, reviewer: ReviewerAgent):
         self.reviewer = reviewer

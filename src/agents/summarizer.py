@@ -6,7 +6,9 @@ from ..config import Config
 from ..utils import strip_think_tags, normalize_llm_content, extract_json_from_text
 from .base import BaseAgent
 from .constants import PromptTemplates
+from ..core.registry import register_agent
 
+@register_agent("summarizer")
 class SummarizerAgent(BaseAgent):
     """
     Summarizer Agent: 负责生成章节摘要和更新故事上下文

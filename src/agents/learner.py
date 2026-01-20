@@ -15,6 +15,7 @@ from ..db.base import SessionLocal
 from ..db.models import NovelBible as DBBible, Character as DBCharacter, PlotOutline as DBOutline, StyleRef as DBStyle
 from sqlalchemy.orm import Session
 from ..config import Config
+from ..core.registry import register_agent
 
 # --- Defines the schemas for parsing ---
 
@@ -60,8 +61,7 @@ class NovelSetupData(BaseModel):
     outlines: List[ExtractedChapterOutline]
     style: ExtractedStyle
 
-# --- Learner Agent Implementation ---
-
+@register_agent("learner")
 class LearnerAgent(BaseAgent):
     """
     LearnerAgent: 负责从非结构化文本中提取结构化的小说设定。

@@ -10,9 +10,15 @@ from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from ..db.vector_store import VectorStore
 from .base import BaseAgent
-from dotenv import load_dotenv
+from .constants import NodeAction, PromptTemplates
+from ..config import Config
+from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
+from ..db import models
+from ..core.registry import register_agent
+import json
+import logging
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 class OutlineExpansion(BaseModel):
     expanded_points: List[PlotPoint] = Field(description="详细的大纲列表，精确到场面调度")
@@ -33,26 +39,25 @@ class ChapterOutline(BaseModel):
 class FullNovelOutline(BaseModel):
     chapters: List[ChapterOutline] = Field(description="全书分章大纲列表")
 
+@register_agent("architect")
 class ArchitectAgent(BaseAgent):
     """
     Architect Agent (Gemini): 负责剧情逻辑、大纲构建与拆解。
     利用 Gemini 的逻辑推演能力，确保世界观一致性。
     遵循 Rule 1.1: Gemini 为王（底层逻辑最终解释权）
     """
+
     def __init__(self, temperature: Optional[float] = None):
         super().__init__(
             model_name="gemini",
             temperature=temperature or Config.model.GEMINI_TEMPERATURE,
             mock_responses=[
-                # Response for generate_chapter_outlines
                 json.dumps({"chapters": [
                     {"chapter_number": 1, "title": "Ch1", "scene_description": "Scene 1", "key_conflict": "Conflict 1", "foreshadowing": []},
                     {"chapter_number": 2, "title": "Ch2", "scene_description": "Scene 2", "key_conflict": "Conflict 2", "foreshadowing": []},
                     {"chapter_number": 3, "title": "Ch3", "scene_description": "Scene 3", "key_conflict": "Conflict 3", "foreshadowing": []}
                 ]}),
-                # Response for plan_next_chapter (called by Writer/Graph)
                 json.dumps({"thinking": "Think", "scene_description": "Scene", "key_conflict": "Conflict", "instruction": "Write"}),
-                # More responses if needed
                 json.dumps({"thinking": "Think", "scene_description": "Scene", "key_conflict": "Conflict", "instruction": "Write"}),
             ]
         )

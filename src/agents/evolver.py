@@ -19,6 +19,13 @@ import json
 logger = logging.getLogger(__name__)
 
 
+# ============ CharacterEvolver Agent ============
+
+from .base import BaseAgent
+from .constants import PromptTemplates
+from ..core.registry import register_agent
+from langchain_core.prompts import ChatPromptTemplate
+
 # ============ 演化结果数据模型 ============
 
 class PersonalityChange(BaseModel):
@@ -163,14 +170,7 @@ class EvolutionResult(BaseModel):
     )
     story_updates: Optional[PlotUpdate] = None
 
-
-# ============ CharacterEvolver Agent ============
-
-from .base import BaseAgent
-from .constants import PromptTemplates
-from langchain_core.prompts import ChatPromptTemplate
-
-
+@register_agent("evolver")
 class CharacterEvolver(BaseAgent):
     """
     增强版人物演化 Agent

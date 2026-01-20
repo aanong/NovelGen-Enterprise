@@ -8,9 +8,11 @@ from ..db.vector_store import VectorStore
 from ..db.models import NovelBible, StyleRef, ReferenceMaterial
 from ..agents.allusion_advisor import AllusionAdvisor
 from .base import BaseNode
+from ..core.registry import register_node
 
 logger = logging.getLogger(__name__)
 
+@register_node("refine_context")
 class RefineContextNode(BaseNode):
     """
     上下文精炼节点

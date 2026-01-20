@@ -7,7 +7,9 @@ from typing import Dict, Any, Optional, Type, TypeVar
 from functools import lru_cache
 import logging
 
-logger = logging.getLogger(__name__)
+from .registry import get_agent_class, get_node_class
+
+from .registry import get_agent_class, get_node_class
 
 T = TypeVar('T')
 
@@ -36,57 +38,81 @@ class AgentFactory:
     def get_writer(self, **kwargs) -> "WriterAgent":
         """获取 Writer Agent"""
         if "writer" not in self._agents or kwargs:
-            from ..agents.writer import WriterAgent
-            self._agents["writer"] = WriterAgent(**kwargs)
+            cls = get_agent_class("writer")
+            if not cls:
+                from ..agents.writer import WriterAgent
+                cls = WriterAgent
+            self._agents["writer"] = cls(**kwargs)
         return self._agents["writer"]
     
     def get_architect(self, **kwargs) -> "ArchitectAgent":
         """获取 Architect Agent"""
         if "architect" not in self._agents or kwargs:
-            from ..agents.architect import ArchitectAgent
-            self._agents["architect"] = ArchitectAgent(**kwargs)
+            cls = get_agent_class("architect")
+            if not cls:
+                from ..agents.architect import ArchitectAgent
+                cls = ArchitectAgent
+            self._agents["architect"] = cls(**kwargs)
         return self._agents["architect"]
     
     def get_reviewer(self, **kwargs) -> "ReviewerAgent":
         """获取 Reviewer Agent"""
         if "reviewer" not in self._agents or kwargs:
-            from ..agents.reviewer import ReviewerAgent
-            self._agents["reviewer"] = ReviewerAgent(**kwargs)
+            cls = get_agent_class("reviewer")
+            if not cls:
+                from ..agents.reviewer import ReviewerAgent
+                cls = ReviewerAgent
+            self._agents["reviewer"] = cls(**kwargs)
         return self._agents["reviewer"]
     
     def get_evolver(self, **kwargs) -> "CharacterEvolver":
         """获取 Character Evolver Agent"""
         if "evolver" not in self._agents or kwargs:
-            from ..agents.evolver import CharacterEvolver
-            self._agents["evolver"] = CharacterEvolver(**kwargs)
+            cls = get_agent_class("evolver")
+            if not cls:
+                from ..agents.evolver import CharacterEvolver
+                cls = CharacterEvolver
+            self._agents["evolver"] = cls(**kwargs)
         return self._agents["evolver"]
     
     def get_summarizer(self, **kwargs) -> "SummarizerAgent":
         """获取 Summarizer Agent"""
         if "summarizer" not in self._agents or kwargs:
-            from ..agents.summarizer import SummarizerAgent
-            self._agents["summarizer"] = SummarizerAgent(**kwargs)
+            cls = get_agent_class("summarizer")
+            if not cls:
+                from ..agents.summarizer import SummarizerAgent
+                cls = SummarizerAgent
+            self._agents["summarizer"] = cls(**kwargs)
         return self._agents["summarizer"]
     
     def get_style_analyzer(self, **kwargs) -> "StyleAnalyzer":
         """获取 Style Analyzer Agent"""
         if "style_analyzer" not in self._agents or kwargs:
-            from ..agents.style_analyzer import StyleAnalyzer
-            self._agents["style_analyzer"] = StyleAnalyzer(**kwargs)
+            cls = get_agent_class("style_analyzer")
+            if not cls:
+                from ..agents.style_analyzer import StyleAnalyzer
+                cls = StyleAnalyzer
+            self._agents["style_analyzer"] = cls(**kwargs)
         return self._agents["style_analyzer"]
     
     def get_rhythm_analyzer(self, **kwargs) -> "RhythmAnalyzer":
         """获取 Rhythm Analyzer Agent"""
         if "rhythm_analyzer" not in self._agents or kwargs:
-            from ..agents.rhythm_analyzer import RhythmAnalyzer
-            self._agents["rhythm_analyzer"] = RhythmAnalyzer(**kwargs)
+            cls = get_agent_class("rhythm_analyzer")
+            if not cls:
+                from ..agents.rhythm_analyzer import RhythmAnalyzer
+                cls = RhythmAnalyzer
+            self._agents["rhythm_analyzer"] = cls(**kwargs)
         return self._agents["rhythm_analyzer"]
     
     def get_allusion_advisor(self, **kwargs) -> "AllusionAdvisor":
         """获取 Allusion Advisor Agent"""
         if "allusion_advisor" not in self._agents or kwargs:
-            from ..agents.allusion_advisor import AllusionAdvisor
-            self._agents["allusion_advisor"] = AllusionAdvisor(**kwargs)
+            cls = get_agent_class("allusion_advisor")
+            if not cls:
+                from ..agents.allusion_advisor import AllusionAdvisor
+                cls = AllusionAdvisor
+            self._agents["allusion_advisor"] = cls(**kwargs)
         return self._agents["allusion_advisor"]
     
     def clear_cache(self):

@@ -10,7 +10,16 @@ from ..config import Config
 from ..utils import strip_think_tags, normalize_llm_content
 from .base import BaseAgent
 from .constants import SceneType, Defaults, PromptTemplates, ErrorMessages
+from ..config import Config
+from ..utils import strip_think_tags, normalize_llm_content
+from ..core.registry import register_agent
+import json
+import logging
+import re
 
+logger = logging.getLogger(__name__)
+
+@register_agent("writer")
 class WriterAgent(BaseAgent):
     """
     Writer Agent: 负责正文撰写与文风模仿

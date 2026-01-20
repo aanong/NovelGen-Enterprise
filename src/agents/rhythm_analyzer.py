@@ -13,50 +13,9 @@ from ..schemas.state import NGEState
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
 from .base import BaseAgent
+from ..core.registry import register_agent
 
-
-class RhythmLevel(BaseModel):
-    """节奏等级模型"""
-    # 节奏强度 1-10（1=极度舒缓，10=极度紧张）
-    intensity: int = Field(ge=1, le=10, description="节奏强度 1-10")
-    # 节奏类型
-    rhythm_type: str = Field(description="节奏类型：climax(高潮)/rising(上升)/falling(下降)/calm(平静)/transition(过渡)")
-    # 主要情绪基调
-    emotional_tone: str = Field(description="情绪基调：紧张、悲伤、喜悦、愤怒、恐惧、平静、期待等")
-
-
-class ChapterRhythmAnalysis(BaseModel):
-    """单章节奏分析"""
-    chapter_number: int = Field(description="章节序号")
-    rhythm_level: RhythmLevel = Field(description="节奏等级")
-    key_events: List[str] = Field(default_factory=list, description="关键事件")
-    pacing_notes: str = Field(default="", description="节奏备注")
-
-
-class RhythmCurveAnalysis(BaseModel):
-    """节奏曲线分析结果"""
-    recent_chapters: List[ChapterRhythmAnalysis] = Field(description="近期章节节奏分析")
-    overall_trend: str = Field(description="整体趋势：ascending(上升)/descending(下降)/fluctuating(波动)/flat(平缓)")
-    pattern_warning: Optional[str] = Field(None, description="节奏模式警告（如连续高潮）")
-    average_intensity: float = Field(description="平均节奏强度")
-
-
-class RhythmSuggestion(BaseModel):
-    """下一章节奏建议"""
-    suggested_intensity: int = Field(ge=1, le=10, description="建议的节奏强度")
-    suggested_type: str = Field(description="建议的节奏类型")
-    suggested_tone: str = Field(description="建议的情绪基调")
-    reasoning: str = Field(description="建议理由")
-    pacing_instructions: List[str] = Field(description="具体的节奏控制指令")
-    avoid_patterns: List[str] = Field(default_factory=list, description="应避免的模式")
-
-
-class RhythmAnalysisResult(BaseModel):
-    """完整的节奏分析结果"""
-    curve_analysis: RhythmCurveAnalysis = Field(description="节奏曲线分析")
-    next_chapter_suggestion: RhythmSuggestion = Field(description="下一章建议")
-
-
+@register_agent("rhythm_analyzer")
 class RhythmAnalyzer(BaseAgent):
     """
     RhythmAnalyzer Agent: 负责剧情节奏分析与控制

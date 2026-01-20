@@ -13,6 +13,7 @@ from ..utils import MockChatModel
 from ..core.llm_handler import LLMResponseHandler
 from ..core.exceptions import LLMParseError
 from ..core.cache import get_cache_manager
+from ..core.llm_strategies import LLMStrategyFactory
 import logging
 
 logger = logging.getLogger(__name__)
@@ -57,55 +58,24 @@ class BaseAgent(ABC):
     
     def _init_llm(self, use_mock: bool, mock_responses: Optional[list]) -> Any:
         """
-        初始化 LLM 实例
+        Initialize LLM instance
         
         Args:
-            use_mock: 是否使用 Mock 模型
-            mock_responses: Mock 响应列表
+            use_mock: Whether to use Mock model
+            mock_responses: Mock response list
             
         Returns:
-            LLM 实例
+            LLM instance
         """
-        # 优先使用 Mock（用于测试）
+        # Priority 1: Use Mock (for testing)
         if use_mock or Config.model.GEMINI_MODEL == "mock":
             logger.info(f"{self.__class__.__name__} using MockChatModel")
             return MockChatModel(responses=mock_responses or [])
         
-        # 根据模型名称选择对应的 LLM
-        if self.model_name == "gemini":
-            temp = self.temperature or Config.model.GEMINI_TEMPERATURE
-            return ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=temp
-            )
-        elif self.model_name in ("deepseek", "logic"):
-            # 检查是否是本地 Ollama
-            if "localhost" in Config.model.DEEPSEEK_API_BASE or Config.model.DEEPSEEK_API_KEY == "ollama":
-                logger.info(f"{self.__class__.__name__} falling back to Gemini (Ollama not available)")
-                temp = self.temperature or Config.model.DEEPSEEK_ARCHITECT_TEMP
-                return ChatGoogleGenerativeAI(
-                    model=Config.model.GEMINI_MODEL,
-                    google_api_key=Config.model.GEMINI_API_KEY,
-                    temperature=temp
-                )
-            else:
-                temp = self.temperature or Config.model.DEEPSEEK_ARCHITECT_TEMP
-                return ChatOpenAI(
-                    model=Config.model.DEEPSEEK_MODEL,
-                    openai_api_key=Config.model.DEEPSEEK_API_KEY,
-                    openai_api_base=Config.model.DEEPSEEK_API_BASE,
-                    temperature=temp
-                )
-        else:
-            # 默认回退到 Gemini
-            logger.warning(f"Unknown model_name '{self.model_name}', falling back to Gemini")
-            temp = self.temperature or Config.model.GEMINI_TEMPERATURE
-            return ChatGoogleGenerativeAI(
-                model=Config.model.GEMINI_MODEL,
-                google_api_key=Config.model.GEMINI_API_KEY,
-                temperature=temp
-            )
+        # Priority 2: Use Strategy Pattern
+        strategy = LLMStrategyFactory.get_strategy(self.model_name)
+        logger.info(f"{self.__class__.__name__} using {strategy.__class__.__name__}")
+        return strategy.create_llm(temperature=self.temperature)
     
     @abstractmethod
     async def process(self, *args, **kwargs) -> Any:

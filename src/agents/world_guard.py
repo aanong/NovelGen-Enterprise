@@ -15,7 +15,9 @@ from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_cont
 from ..db.vector_store import VectorStore
 from ..db.models import NovelBible
 from .base import BaseAgent
+from ..core.registry import register_agent
 
+# ============ 世界规则模型 ============
 
 class WorldRuleType(BaseModel):
     """世界规则类型"""
@@ -45,7 +47,7 @@ class ConsistencyCheckResult(BaseModel):
     critical_count: int = Field(default=0, description="严重违规数量")
     needs_revision: bool = Field(default=False, description="是否需要修订")
 
-
+@register_agent("world_guard")
 class WorldConsistencyGuard(BaseAgent):
     """
     世界观一致性守护 Agent

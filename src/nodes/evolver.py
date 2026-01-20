@@ -23,10 +23,11 @@ from ..db.models import (
 from ..monitoring import monitor
 from ..config import Config
 from .base import BaseNode
+from ..core.registry import register_node
 
 logger = logging.getLogger(__name__)
 
-
+@register_node("evolve")
 class EvolveNode(BaseNode):
     """
     增强版演化节点

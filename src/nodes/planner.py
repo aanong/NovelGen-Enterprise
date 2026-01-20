@@ -7,9 +7,11 @@ from ..db.models import PlotOutline
 from ..agents.architect import ArchitectAgent
 from ..agents.rhythm_analyzer import RhythmAnalyzer
 from .base import BaseNode
+from ..core.registry import register_node
 
 logger = logging.getLogger(__name__)
 
+@register_node("plan")
 class PlanNode(BaseNode):
     """
     规划节点

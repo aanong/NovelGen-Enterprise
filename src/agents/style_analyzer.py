@@ -6,9 +6,11 @@ from ..config import Config
 from .base import BaseAgent
 from typing import Optional, Any
 from dotenv import load_dotenv
+from ..core.registry import register_agent
 
 load_dotenv()
 
+@register_agent("style_analyzer")
 class StyleAnalyzer(BaseAgent):
     """
     文风分析 Agent，负责从参考文本中提取句式、修辞、节奏等特征。

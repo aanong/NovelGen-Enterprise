@@ -21,7 +21,9 @@ from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_cont
 from ..db.vector_store import VectorStore
 from ..db.models import ReferenceMaterial
 from .base import BaseAgent
+from ..core.registry import register_agent
 
+# ============ 典故使用方式模型 ============
 
 class AllusionUsageType(BaseModel):
     """典故使用方式"""
@@ -56,7 +58,7 @@ class AllusionUsageRecord(BaseModel):
     context: str = Field(description="使用场景描述")
     reference_id: Optional[int] = Field(None, description="关联的 ReferenceMaterial ID")
 
-
+@register_agent("allusion_advisor")
 class AllusionAdvisor(BaseAgent):
     """
     AllusionAdvisor Agent: 负责典故主动注入与追踪

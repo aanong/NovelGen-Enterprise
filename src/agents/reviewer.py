@@ -8,12 +8,16 @@ from ..schemas.state import NGEState, CharacterState
 from ..config import Config
 from ..utils import strip_think_tags, extract_json_from_text, validate_character_consistency, normalize_llm_content
 from .base import BaseAgent
-from dotenv import load_dotenv
+from .constants import NodeAction, ReviewDecision, Defaults, PromptTemplates
+from ..config import Config
+from ..utils import strip_think_tags, extract_json_from_text, normalize_llm_content
+from ..core.registry import register_agent
+import json
+import logging
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-from .constants import SceneType, Defaults, PromptTemplates, ErrorMessages
-
+@register_agent("reviewer")
 class ReviewerAgent(BaseAgent):
     """
     Reviewer Agent (Gemini): 负责逻辑审查、人物OOC检查及状态演化。

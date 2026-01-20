@@ -6,9 +6,11 @@ from ..db.models import Character, CharacterBranchStatus, WorldItem, Chapter as 
 from ..monitoring import monitor
 from ..config import Config
 from .base import BaseNode
+from ..core.registry import register_node
 
 logger = logging.getLogger(__name__)
 
+@register_node("load_context")
 class LoadContextNode(BaseNode):
     async def __call__(self, state: NGEState) -> Dict[str, Any]:
         """从数据库加载/刷新当前的 State（如人物状态、世界观、历史摘要）"""
